@@ -140,6 +140,7 @@ func Provider() *schema.Provider {
 			"mysql_sql":             resourceSql(),
 			"mysql_user_password":   resourceUserPassword(),
 			"mysql_user":            resourceUser(),
+			"mysql_ti_config":       resourceTiConfigVariable(),
 		},
 
 		ConfigureFunc: providerConfigure,

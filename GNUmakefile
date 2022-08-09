@@ -6,6 +6,8 @@ TERRAFORM_VERSION=0.14.7
 TERRAFORM_OS=$(shell uname -s | tr A-Z a-z)
 TEST_USER=root
 TEST_PASSWORD=my-secret-pw
+ARCH=$(shell uname -m|sed -e's/(amd64|x86_64)/amd64/g' |sed -e's/(arm64|aarch64)/arm64/g')
+TIUP_HOME=$(CURDIR)/bin/.tiup
 
 default: build
 
@@ -52,12 +54,21 @@ testpercona:
 testtidb%:
 	$(MAKE) MYSQL_VERSION=$* MYSQL_PORT=34$(shell echo "$*" | tr -d '.') testtidb
 
-testtidb:
-	-docker run --rm --name test-tidb$(MYSQL_VERSION) -d -p $(MYSQL_PORT):4000 pingcap/tidb:v$(MYSQL_VERSION)
+bin/tiup:
+	test -d "$(CURDIR)/bin" || mkdir -p "$(CURDIR)/bin"
+	test -d "$(TIUP_HOME)" || mkdir -p "$(TIUP_HOME)"
+	(curl -sfL "https://tiup-mirrors.pingcap.com/tiup-$(TERRAFORM_OS)-$(ARCH).tar.gz?$(shell date "+%Y%m%d%H%M%S")" -o "$(TIUP_HOME)/tiup-$(TERRAFORM_OS)-$(ARCH).tar.gz" && \
+	tar zxf $(TIUP_HOME)/tiup-$(TERRAFORM_OS)-$(ARCH).tar.gz -C $(TIUP_HOME) && \
+	chmod 755 $(TIUP_HOME)/tiup && \
+	rm "$(TIUP_HOME)/tiup-$(TERRAFORM_OS)-$(ARCH).tar.gz" || exit 1 )
+
+testtidb: bin/tiup
+	$(eval TEMPDIR := $(shell mktemp -d))
+	-nohup $(TIUP_HOME)/bin/tiup playground 6.1.0 --without-monitor --db.port $(MYSQL_PORT)  > $(TEMPDIR)/tiup.log 2>&1 & echo "$$!" > $(TEMPDIR)/tiup.pid
 	@echo 'Waiting for TiDB...'
 	@while ! mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -e 'SELECT 1' >/dev/null 2>&1; do printf '.'; sleep 1; done ; echo ; echo "Connected!"
 	MYSQL_USERNAME="$(TEST_USER)" MYSQL_PASSWORD="" MYSQL_ENDPOINT=127.0.0.1:$(MYSQL_PORT) $(MAKE) testacc
-	docker rm -f test-tidb$(MYSQL_VERSION)
+	kill $$(cat $(TEMPDIR)/tiup.pid)
 
 testmariadb%:
 	$(MAKE) MYSQL_VERSION=$* MYSQL_PORT=36$(shell echo "$*" | tr -d '.') testmariadb
@@ -68,8 +79,6 @@ testmariadb:
 	@while ! mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -p"$(TEST_PASSWORD)" -e 'SELECT 1' >/dev/null 2>&1; do printf '.'; sleep 1; done ; echo ; echo "Connected!"
 	MYSQL_USERNAME="$(TEST_USER)" MYSQL_PASSWORD="$(TEST_PASSWORD)" MYSQL_ENDPOINT=127.0.0.1:$(MYSQL_PORT) $(MAKE) testacc
 	docker rm -f test-mariadb$(MYSQL_VERSION)
-
-
 
 vet:
 	@echo "go vet ."

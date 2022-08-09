@@ -4,6 +4,9 @@ github.com/agext/levenshtein
 # github.com/apparentlymart/go-textseg/v13 v13.0.0
 ## explicit; go 1.16
 github.com/apparentlymart/go-textseg/v13/textseg
+# github.com/creasty/defaults v1.6.0
+## explicit; go 1.14
+github.com/creasty/defaults
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
@@ -169,6 +172,15 @@ github.com/mitchellh/reflectwalk
 # github.com/oklog/run v1.1.0
 ## explicit; go 1.13
 github.com/oklog/run
+# github.com/tidwall/gjson v1.14.2
+## explicit; go 1.12
+github.com/tidwall/gjson
+# github.com/tidwall/match v1.1.1
+## explicit; go 1.15
+github.com/tidwall/match
+# github.com/tidwall/pretty v1.2.0
+## explicit; go 1.16
+github.com/tidwall/pretty
 # github.com/vmihailenco/msgpack v4.0.4+incompatible
 ## explicit
 github.com/vmihailenco/msgpack

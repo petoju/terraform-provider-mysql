@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -98,5 +99,23 @@ func testAccPreCheckSkipMariaDB(t *testing.T) {
 
 	if strings.Contains(currentVersionString, "MariaDB") {
 		t.Skip("Skip on MariaDB")
+	}
+}
+
+func testAccPreCheckSkipNotTiDB(t *testing.T) {
+	testAccPreCheck(t)
+	db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
+	if err != nil {
+		return
+	}
+
+	currentVersionString, err := serverVersionString(db)
+	if err != nil {
+		return
+	}
+
+	if !strings.Contains(currentVersionString, "TiDB") {
+		msg := fmt.Sprintf("Skip on MySQL %s", currentVersionString)
+		t.Skip(msg)
 	}
 }
