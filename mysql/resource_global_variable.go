@@ -10,9 +10,9 @@ import (
 
 func resourceGlobalVariable() *schema.Resource {
 	return &schema.Resource{
-		Create: CreateGlobalVariable,
+		Create: CreateOrUpdateGlobalVariable,
 		Read:   ReadGlobalVariable,
-		Update: UpdateGlobalVariable,
+		Update: CreateOrUpdateGlobalVariable,
 		Delete: DeleteGlobalVariable,
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
@@ -31,11 +31,15 @@ func resourceGlobalVariable() *schema.Resource {
 	}
 }
 
-func CreateGlobalVariable(d *schema.ResourceData, meta interface{}) error {
+func CreateOrUpdateGlobalVariable(d *schema.ResourceData, meta interface{}) error {
 	db := meta.(*MySQLConfiguration).Db
 
 	name := d.Get("name").(string)
 	value := d.Get("value").(string)
+
+	if !isNumeric(value) {
+		value = quoteIdentifier(value)
+	}
 
 	sql := fmt.Sprintf("SET GLOBAL %s = %s", quoteIdentifier(name), value)
 	log.Printf("[DEBUG] SQL: %s", sql)
@@ -47,7 +51,7 @@ func CreateGlobalVariable(d *schema.ResourceData, meta interface{}) error {
 
 	d.SetId(name)
 
-	return nil
+	return ReadGlobalVariable(d, meta)
 }
 
 func ReadGlobalVariable(d *schema.ResourceData, meta interface{}) error {
@@ -70,22 +74,6 @@ func ReadGlobalVariable(d *schema.ResourceData, meta interface{}) error {
 	d.Set("value", value)
 
 	return nil
-}
-
-func UpdateGlobalVariable(d *schema.ResourceData, meta interface{}) error {
-	db := meta.(*MySQLConfiguration).Db
-
-	name := d.Get("name").(string)
-	value := d.Get("value").(string)
-
-	sql := fmt.Sprintf("SET GLOBAL %s = %s", quoteIdentifier(name), value)
-	log.Printf("[DEBUG] SQL: %s", sql)
-
-	_, err := db.Exec(sql)
-	if err != nil {
-		return fmt.Errorf("error update value: %s", err)
-	}
-	return ReadGlobalVariable(d, meta)
 }
 
 func DeleteGlobalVariable(d *schema.ResourceData, meta interface{}) error {

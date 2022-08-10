@@ -11,17 +11,18 @@ import (
 
 func TestAccGlobalVar_basic(t *testing.T) {
 	varName := "max_connections"
+	varValue := 1
 	resourceName := "mysql_global_variable.test"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccGlobalVarCheckDestroy(varName),
+		CheckDestroy: testAccGlobalVarCheckDestroy(varName, fmt.Sprint(varValue)),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccGlobalVarConfig_basic(varName),
+				Config: testAccGlobalVarConfig_intValue(varName, varValue),
 				Check: resource.ComposeTestCheckFunc(
-					testAccGlobalVarExists(varName),
+					testAccGlobalVarExists(varName, fmt.Sprint(varValue)),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
 				),
 			},
@@ -29,20 +30,40 @@ func TestAccGlobalVar_basic(t *testing.T) {
 	})
 }
 
-func testAccGlobalVarExists(varName string) resource.TestCheckFunc {
+func TestAccGlobalVar_variableTiDBTests(t *testing.T) {
+	varName := "tidb_auto_analyze_end_time"
+	varValue := "07:00 +0300"
+	resourceName := "mysql_global_variable.test"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t); testAccPreCheckSkipNotTiDB(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccGlobalVarCheckDestroy(varName, varValue),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGlobalVarConfig_stringValue(varName, varValue),
+				Check: resource.ComposeTestCheckFunc(
+					testAccGlobalVarExists(varName, varValue),
+					resource.TestCheckResourceAttr(resourceName, "name", varName),
+				),
+			},
+		},
+	})
+}
+
+func testAccGlobalVarExists(varName, varExpected string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
 
-		count, err := testAccGetGlobalVar(varName, db)
-
+		varReturned, err := testAccGetGlobalVar(varName, db)
 		if err != nil {
 			return err
 		}
 
-		if count == 1 {
+		if varReturned == varExpected {
 			return nil
 		}
 
@@ -50,32 +71,31 @@ func testAccGlobalVarExists(varName string) resource.TestCheckFunc {
 	}
 }
 
-func testAccGetGlobalVar(varName string, db *sql.DB) (int, error) {
+func testAccGetGlobalVar(varName string, db *sql.DB) (string, error) {
 	stmt, err := db.Prepare("SHOW GLOBAL VARIABLES WHERE VARIABLE_NAME = ?")
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
-	var name string
-	var value int
+	var name, value string
 	err = stmt.QueryRow(varName).Scan(&name, &value)
 
 	if err != nil && err != sql.ErrNoRows {
-		return 0, err
+		return "", err
 	}
 
 	return value, nil
 }
 
-func testAccGlobalVarCheckDestroy(varName string) resource.TestCheckFunc {
+func testAccGlobalVarCheckDestroy(varName, varExpected string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		db, err := connectToMySQL(testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
 
-		count, err := testAccGetGlobalVar(varName, db)
-		if count == 1 {
+		varReturned, _ := testAccGetGlobalVar(varName, db)
+		if varReturned == varExpected {
 			return fmt.Errorf("Global variable '%s' still has non default value", varName)
 		}
 
@@ -83,11 +103,20 @@ func testAccGlobalVarCheckDestroy(varName string) resource.TestCheckFunc {
 	}
 }
 
-func testAccGlobalVarConfig_basic(varName string) string {
+func testAccGlobalVarConfig_intValue(varName string, varValue int) string {
 	return fmt.Sprintf(`
 resource "mysql_global_variable" "test" {
   name = "%s"
-	value = 1
+	value = %d
 }
-`, varName)
+`, varName, varValue)
+}
+
+func testAccGlobalVarConfig_stringValue(varName, varValue string) string {
+	return fmt.Sprintf(`
+resource "mysql_global_variable" "test" {
+  name = "%s"
+	value = "%s"
+}
+`, varName, varValue)
 }
