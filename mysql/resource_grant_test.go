@@ -742,3 +742,98 @@ func testAccGrantConfigComplexRoleGrants(user string) string {
 		privileges = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "RELOAD", "PROCESS", "REFERENCES", "INDEX", "ALTER", "SHOW DATABASES", "CREATE TEMPORARY TABLES", "LOCK TABLES", "EXECUTE", "REPLICATION SLAVE", "REPLICATION CLIENT", "CREATE VIEW", "SHOW VIEW", "CREATE ROUTINE", "ALTER ROUTINE", "CREATE USER", "EVENT", "TRIGGER"]
 	}`, user)
 }
+func prepareProcedure(dbname string, procedureName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+		createProcedureSQL := fmt.Sprintf(`
+			CREATE PROCEDURE %s()
+			BEGIN
+				SELECT 'Procedure executed successfully';
+			END
+			`, procedureName)
+		if _, err := db.Exec(createProcedureSQL); err != nil {
+			return fmt.Errorf("error reading grant: %s", err)
+		}
+		return nil
+	}
+}
+
+func TestAccGrantOnProcedure(t *testing.T) {
+	procedureName := "test_procedure"
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	userName := "test_user"
+	hostName := "%"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				// Create table first
+				Config: testAccGrantConfigNoGrant(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					prepareTable(dbName),
+				),
+			},
+			{
+				// Create a procedure
+				Config: testAccGrantConfigNoGrant(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					prepareProcedure(dbName, procedureName),
+				),
+			},
+			{
+				Config: testAccGrantConfigProcedure(procedureName, userName, hostName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckProcedureGrant("mysql_grant.test_procedure", userName, hostName, procedureName, true),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s", procedureName)),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", ""), // Ensure table attribute is empty
+				),
+			},
+		},
+	})
+}
+
+func testAccGrantConfigProcedure(procedureName, userName, hostName string) string {
+	return fmt.Sprintf(`
+resource "mysql_grant" "test_procedure" {
+    user       = "%s"
+    host       = "%s"
+    privileges = ["EXECUTE"]
+    database   = "PROCEDURE %s"
+}
+`, userName, hostName, procedureName)
+}
+
+func testAccCheckProcedureGrant(resourceName, userName, hostName, procedureName string, expected bool) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		// Obtain the database connection from the Terraform provider
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+
+		// Query the database to check if the grant exists
+		var exists bool
+		query := fmt.Sprintf("SELECT EXISTS(SELECT * FROM information_schema.routine_privileges WHERE grantee = '%s@%s' AND routine_name = '%s' AND privilege_type = 'EXECUTE')", userName, hostName, procedureName)
+		err = db.QueryRow(query).Scan(&exists)
+		if err != nil {
+			return err
+		}
+
+		// Compare the result with the expected outcome
+		if exists != expected {
+			return fmt.Errorf("Grant for procedure %s does not match expected state: %v", procedureName, expected)
+		}
+
+		return nil
+	}
+}

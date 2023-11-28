@@ -16,6 +16,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
+var kReProcedure = regexp.MustCompile(`(?i)^(function|procedure) (.*)$`)
+
 type MySQLGrant struct {
 	Database   string
 	Table      string
@@ -119,10 +121,9 @@ func flattenList(list []interface{}, template string) string {
 
 func formatDatabaseName(database string) string {
 	if strings.Compare(database, "*") != 0 && !strings.HasSuffix(database, "`") {
-		reProcedure := regexp.MustCompile(`(?i)^(function|procedure) (.*)$`)
-		if reProcedure.MatchString(database) {
+		if kReProcedure.MatchString(database) {
 			// This is only a hack - user can specify function / procedure as database.
-			database = reProcedure.ReplaceAllString(database, "$1 `${2}`")
+			database = kReProcedure.ReplaceAllString(database, "$1 `${2}`")
 		} else {
 			database = fmt.Sprintf("`%s`", database)
 		}
@@ -133,7 +134,7 @@ func formatDatabaseName(database string) string {
 
 func formatTableName(table string) string {
 	if table == "" || table == "*" {
-		return fmt.Sprintf("*")
+		return "*"
 	}
 	return fmt.Sprintf("`%s`", table)
 }
@@ -229,7 +230,13 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	databaseWrapped := formatDatabaseName(database)
 	tableWrapped := formatTableName(table)
 	if (!isRole || hasPrivs) && rolesGranted == 0 {
-		grantOn = fmt.Sprintf(" ON %s.%s", databaseWrapped, tableWrapped)
+		// Procedures do not belong to tables
+		// If we are granting to a procedure, we don't need to specify table.
+		if kReProcedure.MatchString(databaseWrapped) {
+			grantOn = fmt.Sprintf(" ON %s", databaseWrapped)
+		} else {
+			grantOn = fmt.Sprintf(" ON %s.%s", databaseWrapped, tableWrapped)
+		}
 	}
 
 	stmtSQL := fmt.Sprintf("GRANT %s%s TO %s",
@@ -640,10 +647,10 @@ func normalizeUserHost(userHost string) string {
 }
 
 func normalizeDatabase(database string) string {
-	reProcedure := regexp.MustCompile("(?i)^(function|procedure) `(.*)$")
-	if reProcedure.MatchString(database) {
+	kReProcedure := regexp.MustCompile("(?i)^(function|procedure) `(.*)$")
+	if kReProcedure.MatchString(database) {
 		// This is only a hack - user can specify function / procedure as database.
-		database = reProcedure.ReplaceAllString(database, "$1 ${2}")
+		database = kReProcedure.ReplaceAllString(database, "$1 ${2}")
 	}
 
 	return database
