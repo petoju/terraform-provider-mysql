@@ -23,7 +23,7 @@ bin/terraform:
 	(cd $(CURDIR)/bin/ ; unzip terraform.zip)
 
 testacc: fmtcheck bin/terraform
-	PATH="$(CURDIR)/bin:${PATH}" TF_ACC=1 go test $(TEST) -v $(TESTARGS) -timeout=90s
+	PATH="$(CURDIR)/bin:${PATH}" TF_ACC=1 TF_LOG=DEBUG go test $(TEST) -v $(TESTARGS) -timeout=90s
 
 acceptance: testversion5.6 testversion5.7 testversion8.0 testpercona5.7 testpercona8.0 testmariadb10.3 testmariadb10.8 testmariadb10.10 testtidb6.1.0
 
@@ -32,7 +32,7 @@ testversion%:
 
 testversion:
 	-docker run --rm --name test-mysql$(MYSQL_VERSION) -e MYSQL_ROOT_PASSWORD="$(TEST_PASSWORD)" -d -p $(MYSQL_PORT):3306 mysql:$(MYSQL_VERSION)
-	@echo 'Waiting for MySQL...'
+	@echo ' Waiting for MySQL...'
 	@while ! mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -p"$(TEST_PASSWORD)" -e 'SELECT 1' >/dev/null 2>&1; do printf '.'; sleep 1; done ; echo ; echo "Connected!"
 	-mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -p"$(TEST_PASSWORD)" -e "INSTALL PLUGIN mysql_no_login SONAME 'mysql_no_login.so';"
 	MYSQL_USERNAME="$(TEST_USER)" MYSQL_PASSWORD="$(TEST_PASSWORD)" MYSQL_ENDPOINT=127.0.0.1:$(MYSQL_PORT) $(MAKE) testacc

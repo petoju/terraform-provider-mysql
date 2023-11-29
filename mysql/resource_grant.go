@@ -122,8 +122,15 @@ func flattenList(list []interface{}, template string) string {
 func formatDatabaseName(database string) string {
 	if strings.Compare(database, "*") != 0 && !strings.HasSuffix(database, "`") {
 		if kReProcedure.MatchString(database) {
-			// This is only a hack - user can specify function / procedure as database.
-			database = kReProcedure.ReplaceAllString(database, "$1 `${2}`")
+			// A legacy feature of the Hashicorp MySQL provider is to allow
+			// procedures to be specified as a database. This logic supports that
+			// legacy feature.
+			reProcedureWithDatabase := regexp.MustCompile(`(?i)^(function|procedure) ([^\.]*)\.([^\.]*)$`)
+			if reProcedureWithDatabase.MatchString(database) {
+				database = reProcedureWithDatabase.ReplaceAllString(database, "$1 `${2}`.`${3}`")
+			} else {
+				database = kReProcedure.ReplaceAllString(database, "$1 `${2}`")
+			}
 		} else {
 			database = fmt.Sprintf("`%s`", database)
 		}
@@ -536,9 +543,9 @@ func showGrant(ctx context.Context, db *sql.DB, user, database, table string, gr
 		Table:    table,
 		Grant:    grantOption,
 	}
+	log.Printf("[DEBUG] Looking for grants for %s.%s", database, table)
 	for _, grant := range allGrants {
 		// We must normalize database as it may contain something like PROCEDURE `asd` or the same without backticks.
-		// TODO: write tests or consider some other way to handle permissions to PROCEDURE/FUNCTION
 		if grant.Grant == grantOption {
 			if normalizeDatabase(grant.Database) == normalizeDatabase(database) && grant.Table == table {
 				grants.Privileges = append(grants.Privileges, grant.Privileges...)
@@ -566,7 +573,7 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 	}
 
 	defer rows.Close()
-	re := regexp.MustCompile(`^GRANT (.+) ON (.+?)\.(.+?) TO ([^ ]+)`)
+	re := regexp.MustCompile(`^GRANT (.+) ON ((?:FUNCTION|PROCEDURE) )?(.+?)\.(.+?) TO ([^ ]+)`)
 
 	// Ex: GRANT `app_read`@`%`,`app_write`@`%` TO `rw_user1`@`localhost
 	reRole := regexp.MustCompile(`^GRANT (.+) TO`)
@@ -585,7 +592,7 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 			continue
 		}
 
-		if m := re.FindStringSubmatch(rawGrant); len(m) == 5 {
+		if m := re.FindStringSubmatch(rawGrant); len(m) == 6 {
 			privsStr := m[1]
 			privList := extractPermTypes(privsStr)
 			privileges := make([]string, len(privList))
@@ -593,7 +600,7 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 			for i, priv := range privList {
 				privileges[i] = strings.TrimSpace(priv)
 			}
-			grantUserHost := m[4]
+			grantUserHost := m[5]
 			if normalizeUserHost(grantUserHost) != normalizeUserHost(user) {
 				// Percona returns also grants for % if we requested IP.
 				// Skip them as we don't want terraform to consider it.
@@ -601,9 +608,21 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 				continue
 			}
 
+			// A legacy feature of the Hashicorp MySQL provider is to allow
+			// procedures to be specified as a database. This logic supports that
+			// legacy feature.
+			var database, table string
+			if m[2] == "" {
+				database = strings.Trim(m[3], "`\"")
+				table = strings.Trim(m[4], "`\"")
+			} else {
+				database = fmt.Sprintf("%s%s.%s", m[2], strings.Trim(m[3], "`\""), strings.Trim(m[4], "`\""))
+				table = "*"
+			}
+
 			grant := &MySQLGrant{
-				Database:   strings.Trim(m[2], "`\""),
-				Table:      strings.Trim(m[3], "`\""),
+				Database:   database,
+				Table:      table,
 				Privileges: privileges,
 				Grant:      reGrant.MatchString(rawGrant),
 			}
@@ -647,7 +666,6 @@ func normalizeUserHost(userHost string) string {
 }
 
 func normalizeDatabase(database string) string {
-	kReProcedure := regexp.MustCompile("(?i)^(function|procedure) `(.*)$")
 	if kReProcedure.MatchString(database) {
 		// This is only a hack - user can specify function / procedure as database.
 		database = kReProcedure.ReplaceAllString(database, "$1 ${2}")

@@ -749,10 +749,34 @@ func prepareProcedure(dbname string, procedureName string) resource.TestCheckFun
 		if err != nil {
 			return err
 		}
+
+		// Switch to the specified database
+		_, err = db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbname))
+		if err != nil {
+			return fmt.Errorf("Error selecting database %s: %s", dbname, err)
+		}
+
+		// Check if the procedure exists
+		var exists int
+		checkExistenceSQL := fmt.Sprintf(`
+SELECT COUNT(*)
+FROM information_schema.ROUTINES
+WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ? AND ROUTINE_TYPE = 'PROCEDURE'
+`)
+		err = db.QueryRowContext(ctx, checkExistenceSQL, dbname, procedureName).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("Error checking existence of procedure %s: %s", procedureName, err)
+		}
+
+		if exists > 0 {
+			return nil
+		}
+
+		// Create the procedure
 		createProcedureSQL := fmt.Sprintf(`
 			CREATE PROCEDURE %s()
 			BEGIN
-				SELECT 'Procedure executed successfully';
+				SELECT 1;
 			END
 			`, procedureName)
 		if _, err := db.Exec(createProcedureSQL); err != nil {
@@ -765,7 +789,7 @@ func prepareProcedure(dbname string, procedureName string) resource.TestCheckFun
 func TestAccGrantOnProcedure(t *testing.T) {
 	procedureName := "test_procedure"
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
-	userName := "test_user"
+	userName := fmt.Sprintf("jdoe-%s", dbName)
 	hostName := "%"
 
 	resource.Test(t, resource.TestCase{
@@ -788,12 +812,12 @@ func TestAccGrantOnProcedure(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccGrantConfigProcedure(procedureName, userName, hostName),
+				Config: testAccGrantConfigProcedure(procedureName, dbName, hostName),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckProcedureGrant("mysql_grant.test_procedure", userName, hostName, procedureName, true),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s", procedureName)),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s.%s", dbName, procedureName)),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", ""), // Ensure table attribute is empty
 				),
 			},
@@ -801,15 +825,29 @@ func TestAccGrantOnProcedure(t *testing.T) {
 	})
 }
 
-func testAccGrantConfigProcedure(procedureName, userName, hostName string) string {
+func testAccGrantConfigProcedure(procedureName string, dbName string, hostName string) string {
 	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user     = "jdoe-%s"
+  host     = "example.com"
+}
+
+resource "mysql_user" "test_global" {
+  user     = "jdoe-%s"
+  host     = "%%"
+}
+
 resource "mysql_grant" "test_procedure" {
-    user       = "%s"
+    user       = "jdoe-%s"
     host       = "%s"
     privileges = ["EXECUTE"]
-    database   = "PROCEDURE %s"
+    database   = "PROCEDURE %s.%s"
 }
-`, userName, hostName, procedureName)
+`, dbName, dbName, dbName, dbName, hostName, dbName, procedureName)
 }
 
 func testAccCheckProcedureGrant(resourceName, userName, hostName, procedureName string, expected bool) resource.TestCheckFunc {
