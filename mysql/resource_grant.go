@@ -448,7 +448,15 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	privileges := d.Get("privileges").(*schema.Set)
 	grantOption := d.Get("grant").(bool)
 
-	whatToRevoke := fmt.Sprintf("ALL ON %s.%s", database, table)
+	// Procedures do not belong to tables
+	// If we are granting to a procedure, we don't need to specify table.
+	var whatToRevoke string
+	if kReProcedure.MatchString(database) {
+		whatToRevoke = fmt.Sprintf("ALL ON %s", database)
+	} else {
+		whatToRevoke = fmt.Sprintf("ALL ON %s.%s", database, table)
+	}
+
 	if len(roles.List()) > 0 {
 		whatToRevoke = flattenList(roles.List(), "'%s'")
 	} else if len(privileges.List()) > 0 {
