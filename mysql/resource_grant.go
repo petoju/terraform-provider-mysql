@@ -169,6 +169,16 @@ func supportsRoles(ctx context.Context, meta interface{}) (bool, error) {
 	return hasRoles, nil
 }
 
+func formatOn(database string, table string) string {
+	// Procedures do not belong to tables
+	// If we are granting to a procedure, we don't need to specify table.
+	if kReProcedure.MatchString(database) {
+		return fmt.Sprintf(" ON %s", database)
+	} else {
+		return fmt.Sprintf(" ON %s.%s", database, table)
+	}
+}
+
 func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	db, err := getDatabaseFromMeta(ctx, meta)
 	if err != nil {
@@ -237,13 +247,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	databaseWrapped := formatDatabaseName(database)
 	tableWrapped := formatTableName(table)
 	if (!isRole || hasPrivs) && rolesGranted == 0 {
-		// Procedures do not belong to tables
-		// If we are granting to a procedure, we don't need to specify table.
-		if kReProcedure.MatchString(databaseWrapped) {
-			grantOn = fmt.Sprintf(" ON %s", databaseWrapped)
-		} else {
-			grantOn = fmt.Sprintf(" ON %s.%s", databaseWrapped, tableWrapped)
-		}
+		grantOn = formatOn(databaseWrapped, tableWrapped)
 	}
 
 	stmtSQL := fmt.Sprintf("GRANT %s%s TO %s",
@@ -448,14 +452,7 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	privileges := d.Get("privileges").(*schema.Set)
 	grantOption := d.Get("grant").(bool)
 
-	// Procedures do not belong to tables
-	// If we are granting to a procedure, we don't need to specify table.
-	var whatToRevoke string
-	if kReProcedure.MatchString(database) {
-		whatToRevoke = fmt.Sprintf("ALL ON %s", database)
-	} else {
-		whatToRevoke = fmt.Sprintf("ALL ON %s.%s", database, table)
-	}
+	whatToRevoke := fmt.Sprintf("ALL %s", formatOn(database, table))
 
 	if len(roles.List()) > 0 {
 		whatToRevoke = flattenList(roles.List(), "'%s'")
@@ -466,7 +463,7 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 			// for role grant, ADMIN OPTION is revoked when role is revoked.
 			privilegeList = fmt.Sprintf("%v, GRANT OPTION", privilegeList)
 		}
-		whatToRevoke = fmt.Sprintf("%s ON %s.%s", privilegeList, database, table)
+		whatToRevoke = fmt.Sprintf("%s %s", privilegeList, formatOn(database, table))
 	}
 
 	sqlStatement := fmt.Sprintf("REVOKE %s FROM %s", whatToRevoke, userOrRole)
