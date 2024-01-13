@@ -548,6 +548,7 @@ func showGrant(ctx context.Context, db *sql.DB, user, database, table string, gr
 		Table:    table,
 		Grant:    grantOption,
 	}
+
 	log.Printf("[DEBUG] Looking for grants for %s.%s", database, table)
 	for _, grant := range allGrants {
 		// We must normalize database as it may contain something like PROCEDURE `asd` or the same without backticks.

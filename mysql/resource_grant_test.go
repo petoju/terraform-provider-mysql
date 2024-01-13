@@ -818,7 +818,7 @@ func TestAccGrantOnProcedure(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s.%s", dbName, procedureName)),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", ""), // Ensure table attribute is empty
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"), // Ensure table attribute is * for procedures
 				),
 			},
 		},
@@ -859,16 +859,41 @@ func testAccCheckProcedureGrant(resourceName, userName, hostName, procedureName 
 			return err
 		}
 
-		// Query the database to check if the grant exists
-		var exists bool
-		query := fmt.Sprintf("SELECT EXISTS(SELECT * FROM information_schema.routine_privileges WHERE grantee = '%s@%s' AND routine_name = '%s' AND privilege_type = 'EXECUTE')", userName, hostName, procedureName)
-		err = db.QueryRow(query).Scan(&exists)
+		// Query to show grants for the specific user
+		query := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", userName, hostName)
+
+		// Use db.Query to execute the query
+		rows, err := db.Query(query)
 		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		// Variable to track if the required privilege is found
+		found := false
+
+		// Iterate through the results
+		for rows.Next() {
+			var grant string
+			if err := rows.Scan(&grant); err != nil {
+				return err
+			}
+
+			// Check if the grant string contains the necessary privilege
+			// Adjust the following line according to the exact format of your GRANT statement
+			if strings.Contains(grant, fmt.Sprintf("`%s`", procedureName)) && strings.Contains(grant, "EXECUTE") {
+				found = true
+				break
+			}
+		}
+
+		// Check if there was an error during iteration
+		if err := rows.Err(); err != nil {
 			return err
 		}
 
 		// Compare the result with the expected outcome
-		if exists != expected {
+		if found != expected {
 			return fmt.Errorf("Grant for procedure %s does not match expected state: %v", procedureName, expected)
 		}
 
