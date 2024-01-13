@@ -142,7 +142,7 @@ func TestAccDifferentHosts(t *testing.T) {
 func TestAccGrantComplex(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipTiDB(t); testAccPreCheckSkipRds(t) },
+		PreCheck:     func() { testAccPreCheckSkipTiDB(t), testAccPreCheckSkipRds(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
@@ -793,7 +793,10 @@ func TestAccGrantOnProcedure(t *testing.T) {
 	hostName := "%"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
+		PreCheck: func() {
+			testAccPreCheckSkipTiDB(t)
+			testAccPreCheck(t)
+		},
 		Providers:    testAccProviders,
 		CheckDestroy: testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
