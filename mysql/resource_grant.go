@@ -16,16 +16,63 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
-type MySQLGrant struct {
+type MySQLGrant interface {
+}
+
+type UserOrRole interface {
+	SQLString() string
+}
+
+type User struct {
+	User string
+	Host string
+}
+
+func (u User) SQLString() string {
+	return fmt.Sprintf("'%s'@'%s'", u.User, u.Host)
+}
+
+type Role struct {
+	Role string
+}
+
+func (r Role) SQLString() string {
+	return fmt.Sprintf("'%s'", r.Role)
+}
+
+type TablePrivilegeGrant struct {
 	Database   string
 	Table      string
 	Privileges []string
-	Roles      []string
 	Grant      bool
+	UserOrRole UserOrRole
+	TLSOption  string
 }
 
-func (m MySQLGrant) String() string {
-	return fmt.Sprintf("{Database=%v,Table=%v,Privileges=%v,Roles=%v,Grant=%v}", m.Database, m.Table, m.Privileges, m.Roles, m.Grant)
+type ObjectT string
+
+var (
+	kProcedure ObjectT = "PROCEDURE"
+	kFunction  ObjectT = "FUNCTION"
+	kTable     ObjectT = "TABLE"
+)
+
+type ProcedurePrivilegeGrant struct {
+	Database     string
+	ObjectT      CallableType
+	CallableName string
+	Privileges   []string
+	Grant        bool
+	UserOrRole   UserOrRole
+	TLSOption    string
+}
+
+type RoleGrant struct {
+	Database   string
+	Roles      []string
+	Grant      bool
+	UserOrRole UserOrRole
+	TLSOption  string
 }
 
 func resourceGrant() *schema.Resource {
@@ -138,21 +185,6 @@ func formatTableName(table string) string {
 	return fmt.Sprintf("`%s`", table)
 }
 
-// Formats user/host or role. Returns the formatted string and whether it is role. And an error in case it's not supported.
-func userOrRole(user string, host string, role string, hasRoles bool) (string, bool, error) {
-	if len(user) > 0 && len(host) > 0 {
-		return fmt.Sprintf("'%s'@'%s'", user, host), false, nil
-	} else if len(role) > 0 {
-		if !hasRoles {
-			return "", false, fmt.Errorf("roles are only supported on MySQL 8 and above")
-		}
-
-		return fmt.Sprintf("'%s'", role), true, nil
-	} else {
-		return "", false, fmt.Errorf("user with host or a role is required")
-	}
-}
-
 func supportsRoles(ctx context.Context, meta interface{}) (bool, error) {
 	currentVersion := getVersionFromMeta(ctx, meta)
 
@@ -161,50 +193,107 @@ func supportsRoles(ctx context.Context, meta interface{}) (bool, error) {
 	return hasRoles, nil
 }
 
+var kReProcedureWithoutDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^\.]*)$`)
+var kReProcedureWithDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^\.]*)\.([^\.]*)$`)
+
+func parseResource(d *schema.ResourceData) (MySQLGrant, diag.Diagnostics) {
+
+	// Step 1: Parse the user/role
+	var userOrRole UserOrRole
+	userAttr, userOk := d.GetOk("user")
+	hostAttr, hostOk := d.GetOk("host")
+	roleAttr, roleOk := d.GetOk("role")
+	if userOk && hostOk && userAttr.(string) != "" && hostAttr.(string) != "" {
+		userOrRole = User{
+			User: userAttr.(string),
+			Host: hostAttr.(string),
+		}
+	} else if roleOk && roleAttr.(string) != "" {
+		userOrRole = Role{
+			Role: roleAttr.(string),
+		}
+	} else {
+		return nil, diag.Errorf("One of user/host or role is required")
+	}
+
+	// Step 2: Get generic attributes
+	database := d.Get("database").(string)
+	tlsOption := d.Get("tls_option").(string)
+	grantOption := d.Get("grant").(bool)
+
+	// Step 3a: If `roles` is specified, we have a role grant
+	if attr, ok := d.GetOk("roles"); ok {
+		roles := flattenList(attr.(*schema.Set).List(), "'%s'")
+		return RoleGrant{
+			Database:   database,
+			Roles:      roles,
+			Grant:      grantOption,
+			UserOrRole: userOrRole,
+			TLSOption:  tlsOption,
+		}, nil
+	}
+
+	// Step 3b. If the database is a procedure or function, we have a procedure grant
+	if kReProcedureWithDatabase.MatchString(database) || kReProcedureWithoutDatabase.MatchString(database) {
+		var callableType CallableT
+		var callableName string
+		if kReProcedureWithDatabase.MatchString(database) {
+			matches := kReProcedureWithDatabase.FindStringSubmatch(database)
+			callableType = CallableT(matches[1])
+			database = matches[2]
+			callableName = matches[3]
+		} else {
+			matches := kReProcedureWithoutDatabase.FindStringSubmatch(database)
+			callableType = CallableT(matches[1])
+			database = matches[2]
+			callableName = d.Get("table").(string)
+		}
+		privileges := setToArray(d.Get("privileges"))
+		return ProcedurePrivilegeGrant{
+			Database:     database,
+			CallableT:    callableType,
+			CallableName: callableName,
+			Privileges:   privileges,
+			Grant:        grantOption,
+			UserOrRole:   userOrRole,
+			TLSOption:    tlsOption,
+		}, nil
+	}
+
+	// Step 3c. Otherwise, we have a table grant
+	privileges := setToArray(d.Get("privileges"))
+	return TablePrivilegeGrant{
+		Database:   database,
+		Table:      d.Get("table").(string),
+		Privileges: privileges,
+		Grant:      grantOption,
+		UserOrRole: userOrRole,
+		TLSOption:  tlsOption,
+	}, nil
+}
+
 func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	db, err := getDatabaseFromMeta(ctx, meta)
 	if err != nil {
 		return diag.FromErr(err)
 	}
 
-	hasRoles, err := supportsRoles(ctx, meta)
+	// Parse the ResourceData
+	grant, err := parseResource(d)
+	if err != nil {
+		return err
+	}
+
+	// Determine whether the database has support for roles
+	hasRolesSupport, err := supportsRoles(ctx, meta)
 	if err != nil {
 		return diag.Errorf("failed getting role support: %v", err)
 	}
-
-	var (
-		privilegesOrRoles string
-		grantOn           string
-	)
-
-	hasPrivs := false
-	rolesGranted := 0
-	if attr, ok := d.GetOk("privileges"); ok {
-		privilegesOrRoles = flattenList(attr.(*schema.Set).List(), "%s")
-		hasPrivs = true
-	} else if attr, ok := d.GetOk("roles"); ok {
-		if !hasRoles {
-			return diag.Errorf("Roles are only supported on MySQL 8 and above")
-		}
-		listOfRoles := attr.(*schema.Set).List()
-		rolesGranted = len(listOfRoles)
-		privilegesOrRoles = flattenList(listOfRoles, "'%s'")
-	} else {
-		return diag.Errorf("One of privileges or roles is required")
+	if _, ok := grant.(RoleGrant); ok && !hasRolesSupport {
+		return diag.Errorf("role grants are not supported by this version of MySQL")
 	}
 
-	user := d.Get("user").(string)
-	host := d.Get("host").(string)
-	role := d.Get("role").(string)
-	grantOption := d.Get("grant").(bool)
-
-	userOrRole, isRole, err := userOrRole(user, host, role, hasRoles)
-	if err != nil {
-		return diag.Errorf("failed getting whether it's user or a role: %v", err)
-	}
-	database := d.Get("database").(string)
-	table := d.Get("table").(string)
-
+	// Check to see if there are existing roles that might be clobbered by this grant
 	grant, err := showGrant(ctx, db, userOrRole, database, table, grantOption)
 	if err != nil {
 		return diag.Errorf("failed showing grants: %v", err)
@@ -543,15 +632,15 @@ func showGrant(ctx context.Context, db *sql.DB, user, database, table string, gr
 	return grants, nil
 }
 
-func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant, error) {
-	grants := []*MySQLGrant{}
+func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]MySQLGrant, error) {
+	grants := []MySQLGrant{}
 
 	sqlStatement := fmt.Sprintf("SHOW GRANTS FOR %s", user)
 	log.Printf("[DEBUG] SQL: %s", sqlStatement)
 	rows, err := db.QueryContext(ctx, sqlStatement)
 
 	if isNonExistingGrant(err) {
-		return []*MySQLGrant{}, nil
+		return []MySQLGrant{}, nil
 	}
 
 	if err != nil {
@@ -637,16 +726,6 @@ func normalizeUserHost(userHost string) string {
 	withoutBackticks := strings.ReplaceAll(withoutQuotes, "`", "")
 	withoutDblQuotes := strings.ReplaceAll(withoutBackticks, "\"", "")
 	return withoutDblQuotes
-}
-
-func normalizeDatabase(database string) string {
-	reProcedure := regexp.MustCompile("(?i)^(function|procedure) `(.*)$")
-	if reProcedure.MatchString(database) {
-		// This is only a hack - user can specify function / procedure as database.
-		database = reProcedure.ReplaceAllString(database, "$1 ${2}")
-	}
-
-	return database
 }
 
 func removeUselessPerms(grants []string) []string {
