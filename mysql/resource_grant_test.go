@@ -786,68 +786,146 @@ WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ? AND ROUTINE_TYPE = 'PROCEDURE'
 	}
 }
 
-func TestAccGrantOnProcedure(t *testing.T) {
-	procedureName := "test_procedure"
-	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
-	userName := fmt.Sprintf("jdoe-%s", dbName)
-	hostName := "%"
+/**
+ * Test that a grant can be created on a procedure
+ * There are two ways of specifying a procedure grant:
+ *
+ * Example 1: Without table
+ * resource "mysql_grant" "test_procedure" {
+ *   user       = "jdoe"
+ *   host       = "localhost"
+ *   privileges = ["EXECUTE"]
+ *   database   = "PROCEDURE <database_name>.<procedure_name>"
+ *
+ * Example 2: With table
+ * resource "mysql_grant" "test_procedure" {
+ *   user       = "jdoe"
+ *   host       = "localhost"
+ *   privileges = ["EXECUTE"]
+ *   database   = "PROCEDURE <database_name>"
+ *   table      = "<procedure_name>"
+ * }
+ */
 
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipTiDB(t); testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
-		Steps: []resource.TestStep{
-			{
-				// Create table first
-				Config: testAccGrantConfigNoGrant(dbName),
-				Check: resource.ComposeTestCheckFunc(
-					prepareTable(dbName),
-				),
-			},
-			{
-				// Create a procedure
-				Config: testAccGrantConfigNoGrant(dbName),
-				Check: resource.ComposeTestCheckFunc(
-					prepareProcedure(dbName, procedureName),
-				),
-			},
-			{
-				Config: testAccGrantConfigProcedure(procedureName, dbName, hostName),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckProcedureGrant("mysql_grant.test_procedure", userName, hostName, procedureName, true),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s.%s", dbName, procedureName)),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"), // Ensure table attribute is * for procedures
-				),
-			},
-		},
-	})
+type procedureGrantTestCase struct {
+	dbName        string
+	userName      string
+	hostName      string
+	procedureName string
+	testConfig    string
 }
 
-func testAccGrantConfigProcedure(procedureName string, dbName string, hostName string) string {
+func TestAccGrantOnProcedure(t *testing.T) {
+	testConfigs := []*procedureGrantTestCase{}
+
+	// Test Example 1
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	userName := fmt.Sprintf("jdoe-%s", dbName)
+	config := &procedureGrantTestCase{
+		dbName:        dbName,
+		userName:      userName,
+		hostName:      "%",
+		procedureName: "test_procedure",
+		testConfig:    getProcedureTestConfigWithoutTable("test_procedure", dbName, "%", userName),
+	}
+	testConfigs = append(testConfigs, config)
+
+	// Test Example 2
+	dbName = fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	userName = fmt.Sprintf("jdoe-%s", dbName)
+	config = &procedureGrantTestCase{
+		dbName:        dbName,
+		userName:      userName,
+		hostName:      "%",
+		procedureName: "test_procedure",
+		testConfig:    getProcedureTestConfigWithTable("test_procedure", dbName, "%", userName),
+	}
+	testConfigs = append(testConfigs, config)
+
+	for _, c := range testConfigs {
+		resource.Test(t, resource.TestCase{
+			PreCheck:     func() { testAccPreCheckSkipTiDB(t); testAccPreCheck(t) },
+			Providers:    testAccProviders,
+			CheckDestroy: testAccGrantCheckDestroy,
+			Steps: []resource.TestStep{
+				{
+					// Create table first
+					Config: testAccGrantConfigNoGrant(c.dbName),
+					Check: resource.ComposeTestCheckFunc(
+						prepareTable(c.dbName),
+					),
+				},
+				{
+					// Create a procedure
+					Config: testAccGrantConfigNoGrant(c.dbName),
+					Check: resource.ComposeTestCheckFunc(
+						prepareProcedure(c.dbName, c.procedureName),
+					),
+				},
+				{
+					Config: c.testConfig,
+					Check: resource.ComposeTestCheckFunc(
+						testAccCheckProcedureGrant("mysql_grant.test_procedure", c.userName, c.hostName, c.procedureName, true),
+						resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", c.userName),
+						resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", c.hostName),
+						resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s.%s", c.dbName, c.procedureName)),
+						resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"), // Ensure table attribute is * for procedures
+					),
+				},
+			},
+		})
+	}
+}
+
+func getProcedureTestConfigWithoutTable(procedureName string, dbName string, hostName string, userName string) string {
 	return fmt.Sprintf(`
 resource "mysql_database" "test" {
   name = "%s"
 }
 
 resource "mysql_user" "test" {
-  user     = "jdoe-%s"
+  user     = "%s"
   host     = "example.com"
 }
 
 resource "mysql_user" "test_global" {
-  user     = "jdoe-%s"
+  user     = "%s"
   host     = "%%"
 }
 
 resource "mysql_grant" "test_procedure" {
-    user       = "jdoe-%s"
+    user       = "%s"
     host       = "%s"
     privileges = ["EXECUTE"]
     database   = "PROCEDURE %s.%s"
 }
-`, dbName, dbName, dbName, dbName, hostName, dbName, procedureName)
+`, dbName, userName, userName, userName, hostName, dbName, procedureName)
+}
+
+func getProcedureTestConfigWithTable(procedureName string, dbName string, hostName string, userName string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user     = "%s"
+  host     = "example.com"
+}
+
+resource "mysql_user" "test_global" {
+  user     = "%s"
+  host     = "%%"
+}
+
+resource "mysql_grant" "test_procedure" {
+    user       = "%s"
+    host       = "%s"
+    privileges = ["EXECUTE"]
+    database   = "PROCEDURE %s"
+	table      = "%s"
+}
+`, dbName, userName, userName, userName, hostName, dbName, procedureName)
 }
 
 func testAccCheckProcedureGrant(resourceName, userName, hostName, procedureName string, expected bool) resource.TestCheckFunc {

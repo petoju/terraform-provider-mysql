@@ -17,6 +17,7 @@ import (
 )
 
 var kReProcedure = regexp.MustCompile(`(?i)^(function|procedure) (.*)$`)
+var kReProcedureWithDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^\.]*)\.([^\.]*)$`)
 
 type MySQLGrant struct {
 	Database   string
@@ -121,16 +122,13 @@ func flattenList(list []interface{}, template string) string {
 
 func formatDatabaseName(database string) string {
 	if strings.Compare(database, "*") != 0 && !strings.HasSuffix(database, "`") {
-		if kReProcedure.MatchString(database) {
-			// A legacy feature of the Hashicorp MySQL provider is to allow
-			// procedures to be specified as a database. This logic supports that
-			// legacy feature.
-			reProcedureWithDatabase := regexp.MustCompile(`(?i)^(function|procedure) ([^\.]*)\.([^\.]*)$`)
-			if reProcedureWithDatabase.MatchString(database) {
-				database = reProcedureWithDatabase.ReplaceAllString(database, "$1 `${2}`.`${3}`")
-			} else {
-				database = kReProcedure.ReplaceAllString(database, "$1 `${2}`")
-			}
+		// A legacy feature of the Hashicorp MySQL provider is to allow
+		// procedures to be specified as a database. This logic supports that
+		// legacy feature.
+		if kReProcedureWithDatabase.MatchString(database) {
+			database = kReProcedureWithDatabase.ReplaceAllString(database, "$1 `${2}`.`${3}`")
+		} else if kReProcedure.MatchString(database) {
+			database = kReProcedure.ReplaceAllString(database, "$1 `${2}`")
 		} else {
 			database = fmt.Sprintf("`%s`", database)
 		}
@@ -170,9 +168,10 @@ func supportsRoles(ctx context.Context, meta interface{}) (bool, error) {
 }
 
 func formatOn(database string, table string) string {
-	// Procedures do not belong to tables
-	// If we are granting to a procedure, we don't need to specify table.
-	if kReProcedure.MatchString(database) {
+	// A legacy feature of the Hashicorp MySQL provider is to allow
+	// procedures to be specified as a database. This logic supports that
+	// legacy feature.
+	if kReProcedureWithDatabase.MatchString(database) {
 		return fmt.Sprintf(" ON %s", database)
 	} else {
 		return fmt.Sprintf(" ON %s.%s", database, table)
@@ -220,6 +219,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	if err != nil {
 		return diag.Errorf("failed getting whether it's user or a role: %v", err)
 	}
+
 	database := d.Get("database").(string)
 	table := d.Get("table").(string)
 
@@ -246,6 +246,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	// DB and table have to be wrapped in backticks in some cases.
 	databaseWrapped := formatDatabaseName(database)
 	tableWrapped := formatTableName(table)
+
 	if (!isRole || hasPrivs) && rolesGranted == 0 {
 		grantOn = formatOn(databaseWrapped, tableWrapped)
 	}
@@ -302,10 +303,12 @@ func ReadGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) di
 	if err != nil {
 		return diag.Errorf("failed getting user or role: %v", err)
 	}
+
 	database := d.Get("database").(string)
 	table := d.Get("table").(string)
 	grantOption := d.Get("grant").(bool)
 	rolesSet := d.Get("roles").(*schema.Set)
+
 	rolesCount := len(rolesSet.List())
 
 	if rolesCount != 0 {
@@ -549,11 +552,12 @@ func showGrant(ctx context.Context, db *sql.DB, user, database, table string, gr
 		Grant:    grantOption,
 	}
 
-	log.Printf("[DEBUG] Looking for grants for %s.%s", database, table)
+	log.Printf("[DEBUG] Looking for grants for database=%s table=%s", database, table)
 	for _, grant := range allGrants {
+		log.Printf("[DEBUG] Found: %s", grant.String())
 		// We must normalize database as it may contain something like PROCEDURE `asd` or the same without backticks.
 		if grant.Grant == grantOption {
-			if normalizeDatabase(grant.Database) == normalizeDatabase(database) && grant.Table == table {
+			if grant.Database == database && grant.Table == table {
 				grants.Privileges = append(grants.Privileges, grant.Privileges...)
 			}
 			// Roles don't depend on database / table settings.
@@ -562,6 +566,23 @@ func showGrant(ctx context.Context, db *sql.DB, user, database, table string, gr
 	}
 	return grants, nil
 }
+
+// kReGrant matches "GRANT ... ON ... TO"
+// See: https://dev.mysql.com/doc/refman/8.0/en/grant.html
+//
+// m[1] matches priv_type (SELECT, INSERT, ...)
+// m[2] matches object_type (FUNCTION, PROCEDURE or TABLE)
+// m[3] matches the portion of priv_level BEFORE the dot, if one exists.
+// m[4] matches the portion of priv_level AFTER the dot, if one exists.
+// m[5] matches user_or_role
+var kReGrantPrivilege = regexp.MustCompile(`^GRANT (.+) ON ((?:FUNCTION|PROCEDURE) )?(.+?)\.(.+?) TO ([^ ]+)`)
+
+// kReRole matches "GRANT ... TO"
+// Ex: GRANT `app_read`@`%`,`app_write`@`%` TO `rw_user1`@`localhost
+var kReGrantRole = regexp.MustCompile(`^GRANT (.+) TO`)
+
+// kReGrant matches "WITH GRANT OPTION" or "WITH ADMIN OPTION"
+var kReGrant = regexp.MustCompile(`\bGRANT OPTION\b|\bADMIN OPTION\b`)
 
 func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant, error) {
 	grants := []*MySQLGrant{}
@@ -577,13 +598,7 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 	if err != nil {
 		return nil, fmt.Errorf("showUserGrants - getting grants failed: %w", err)
 	}
-
 	defer rows.Close()
-	re := regexp.MustCompile(`^GRANT (.+) ON ((?:FUNCTION|PROCEDURE) )?(.+?)\.(.+?) TO ([^ ]+)`)
-
-	// Ex: GRANT `app_read`@`%`,`app_write`@`%` TO `rw_user1`@`localhost
-	reRole := regexp.MustCompile(`^GRANT (.+) TO`)
-	reGrant := regexp.MustCompile(`\bGRANT OPTION\b|\bADMIN OPTION\b`)
 
 	for rows.Next() {
 		var rawGrant string
@@ -598,7 +613,7 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 			continue
 		}
 
-		if m := re.FindStringSubmatch(rawGrant); len(m) == 6 {
+		if m := kReGrantPrivilege.FindStringSubmatch(rawGrant); len(m) == 6 {
 			privsStr := m[1]
 			privList := extractPermTypes(privsStr)
 			privileges := make([]string, len(privList))
@@ -614,30 +629,29 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 				continue
 			}
 
-			// A legacy feature of the Hashicorp MySQL provider is to allow
-			// procedures to be specified as a database. This logic supports that
-			// legacy feature.
+			// If we are granting to a function or procedure, we don't need to specify table.
+			// Instead, specify the qualified function/procedure name as the database.
 			var database, table string
-			if m[2] == "" {
+			if m[2] != "" {
+				database = strings.Trim(m[3], "`\"")
+				table = fmt.Sprintf("%s %s", m[2], strings.Trim(m[4], "`\""))
+			} else {
 				database = strings.Trim(m[3], "`\"")
 				table = strings.Trim(m[4], "`\"")
-			} else {
-				database = fmt.Sprintf("%s%s.%s", m[2], strings.Trim(m[3], "`\""), strings.Trim(m[4], "`\""))
-				table = "*"
 			}
 
 			grant := &MySQLGrant{
 				Database:   database,
 				Table:      table,
 				Privileges: privileges,
-				Grant:      reGrant.MatchString(rawGrant),
+				Grant:      kReGrant.MatchString(rawGrant),
 			}
 
 			if len(privileges) > 0 {
 				grants = append(grants, grant)
 			}
 
-		} else if m := reRole.FindStringSubmatch(rawGrant); len(m) == 2 {
+		} else if m := kReGrantRole.FindStringSubmatch(rawGrant); len(m) == 2 {
 			roleStr := m[1]
 			rolesStart := strings.Split(roleStr, ",")
 			roles := make([]string, len(rolesStart))
@@ -648,7 +662,7 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 
 			grant := &MySQLGrant{
 				Roles: roles,
-				Grant: reGrant.MatchString(rawGrant),
+				Grant: kReGrant.MatchString(rawGrant),
 			}
 
 			grants = append(grants, grant)
@@ -669,15 +683,6 @@ func normalizeUserHost(userHost string) string {
 	withoutBackticks := strings.ReplaceAll(withoutQuotes, "`", "")
 	withoutDblQuotes := strings.ReplaceAll(withoutBackticks, "\"", "")
 	return withoutDblQuotes
-}
-
-func normalizeDatabase(database string) string {
-	if kReProcedure.MatchString(database) {
-		// This is only a hack - user can specify function / procedure as database.
-		database = kReProcedure.ReplaceAllString(database, "$1 ${2}")
-	}
-
-	return database
 }
 
 func removeUselessPerms(grants []string) []string {
