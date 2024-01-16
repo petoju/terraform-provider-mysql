@@ -17,6 +17,7 @@ import (
 )
 
 type MySQLGrant interface {
+	GetUserOrRole() UserOrRole
 }
 
 type UserOrRole interface {
@@ -68,7 +69,6 @@ type ProcedurePrivilegeGrant struct {
 }
 
 type RoleGrant struct {
-	Database   string
 	Roles      []string
 	Grant      bool
 	UserOrRole UserOrRole
@@ -196,7 +196,7 @@ func supportsRoles(ctx context.Context, meta interface{}) (bool, error) {
 var kReProcedureWithoutDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^\.]*)$`)
 var kReProcedureWithDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^\.]*)\.([^\.]*)$`)
 
-func parseResource(d *schema.ResourceData) (MySQLGrant, diag.Diagnostics) {
+func parseResourceFromData(d *schema.ResourceData) (MySQLGrant, diag.Diagnostics) {
 
 	// Step 1: Parse the user/role
 	var userOrRole UserOrRole
@@ -279,7 +279,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	}
 
 	// Parse the ResourceData
-	grant, err := parseResource(d)
+	grant, err := parseResourceFromData(d)
 	if err != nil {
 		return err
 	}
@@ -609,7 +609,7 @@ func restoreGrant(user string, host string, grant *MySQLGrant) *schema.ResourceD
 }
 
 func showGrant(ctx context.Context, db *sql.DB, user, database, table string, grantOption bool) (MySQLGrant, error) {
-	allGrants, err := showUserGrants(ctx, db, user)
+	allGrants, err := showUserGrants(ctx, db, userOrRole)
 	if err != nil {
 		return MySQLGrant{}, fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
@@ -632,10 +632,113 @@ func showGrant(ctx context.Context, db *sql.DB, user, database, table string, gr
 	return grants, nil
 }
 
-func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]MySQLGrant, error) {
+var (
+	reRequire = regexp.MustCompile(`.*REQUIRE\s+(.*)`)
+
+	userHostRegex = regexp.MustCompile(`'([^']*)'(@'([^']*)')?`)
+	roleRegex     = regexp.MustCompile(`'[^']+'`)
+
+	roleGrantRegex      = regexp.MustCompile(`GRANT\s+([\w\s,]+)\s+TO\s+(.+)`)
+	reGrant             = regexp.MustCompile(`\bGRANT OPTION\b|\bADMIN OPTION\b`)
+	procedureGrantRegex = regexp.MustCompile(`GRANT\s+([\w\s,]+)\s+ON\s+(FUNCTION|PROCEDURE)\s+([\w\s,]+)\s+TO\s+(.+)`)
+	tableGrantRegex     = regexp.MustCompile(`GRANT\s+([\w\s,]+)\s+ON\s+(.+)\s+TO\s+(.+)`)
+)
+
+func parseGrantFromRow(grant string) (MySQLGrant, error) {
+
+	// Ignore REVOKE.*
+	if strings.HasPrefix(rawGrant, "REVOKE") {
+		log.Printf("[WARN] Partial revokes are not fully supported and lead to unexpected behavior. Consult documentation https://dev.mysql.com/doc/refman/8.0/en/partial-revokes.html on how to disable them for safe and reliable terraform. Relevant partial revoke: %s\n", rawGrant)
+		return nil, nil
+	}
+
+	// Parse Require Statement
+	tlsOption := ""
+	if requireMatches := reRequire.FindStringSubmatch(grantStr); len(requireMatches) == 2 {
+		tlsOption = requireMatches[1]
+	}
+
+	// Parse User or Role Statement
+	var userOrRole UserOrRole
+	if userHostMatches := userHostRegex.FindStringSubmatch(grantStr); len(userHostMatches) == 4 {
+		user := strings.Trim(userHostMatches[1], "`' ")
+		host := strings.Trim(userHostMatches[3], "`' ")
+		userOrRole = User{
+			User: user,
+			Host: host,
+		}
+	} else if roleMatches := roleRegex.FindStringSubmatch(grantStr); len(roleMatches) == 1 {
+		role := strings.Trim(roleMatches[0], "`' ")
+		userOrRole = Role{
+			Role: role,
+		}
+	} else {
+		return nil, fmt.Errorf("failed to parse grant statement: %s", grantStr)
+	}
+
+	// Handle Role Grants
+	if roleMatches := roleGrantRegex.FindStringSubmatch(grantStr); len(roleMatches) == 3 {
+		rolesStart := strings.Split(roleMatches[1], ",")
+		roles := make([]string, len(rolesStart))
+
+		for i, role := range rolesStart {
+			roles[i] = strings.Trim(role, "`@%\" ")
+		}
+
+		grant := &RoleGrant{
+			Roles:      roles,
+			Grant:      reGrant.MatchString(grantStr),
+			UserOrRole: userOrRole,
+			TLSOption:  tlsOption,
+		}
+		return grant, nil
+
+	} else if procedureMatches := procedureGrantRegex.FindStringSubmatch(grantStr); len(procedureMatches) == 5 {
+		privsStr := procedureMatches[1]
+		privList := extractPermTypes(privsStr)
+		privileges := make([]string, len(privList))
+
+		for i, priv := range privList {
+			privileges[i] = strings.TrimSpace(priv)
+		}
+
+		grant := &ProcedurePrivilegeGrant{
+			Database:     strings.Trim(procedureMatches[3], "`\""),
+			ObjectT:      ObjectT(procedureMatches[2]),
+			CallableName: strings.Trim(procedureMatches[3], "`\""),
+			Privileges:   privileges,
+			Grant:        reGrant.MatchString(grantStr),
+			UserOrRole:   userOrRole,
+			TLSOption:    tlsOption,
+		}
+		return grant, nil
+	} else if tableMatches := tableGrantRegex.FindStringSubmatch(grantStr); len(tableMatches) == 4 {
+		privsStr := tableMatches[1]
+		privList := extractPermTypes(privsStr)
+		privileges := make([]string, len(privList))
+
+		for i, priv := range privList {
+			privileges[i] = strings.TrimSpace(priv)
+		}
+
+		grant := &TablePrivilegeGrant{
+			Database:   strings.Trim(tableMatches[2], "`\""),
+			Table:      strings.Trim(tableMatches[3], "`\""),
+			Privileges: privileges,
+			Grant:      reGrant.MatchString(grantStr),
+			UserOrRole: userOrRole,
+			TLSOption:  tlsOption,
+		}
+		return grant, nil
+	} else {
+		return nil, fmt.Errorf("failed to parse grant statement: %s", grantStr)
+	}
+}
+
+func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {
 	grants := []MySQLGrant{}
 
-	sqlStatement := fmt.Sprintf("SHOW GRANTS FOR %s", user)
+	sqlStatement := fmt.Sprintf("SHOW GRANTS FOR %s", userOrRole.SQLString())
 	log.Printf("[DEBUG] SQL: %s", sqlStatement)
 	rows, err := db.QueryContext(ctx, sqlStatement)
 
@@ -648,12 +751,6 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]MySQLGrant,
 	}
 
 	defer rows.Close()
-	re := regexp.MustCompile(`^GRANT (.+) ON (.+?)\.(.+?) TO ([^ ]+)`)
-
-	// Ex: GRANT `app_read`@`%`,`app_write`@`%` TO `rw_user1`@`localhost
-	reRole := regexp.MustCompile(`^GRANT (.+) TO`)
-	reGrant := regexp.MustCompile(`\bGRANT OPTION\b|\bADMIN OPTION\b`)
-
 	for rows.Next() {
 		var rawGrant string
 
@@ -662,70 +759,26 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]MySQLGrant,
 			return nil, fmt.Errorf("showUserGrants - reading row failed: %w", err)
 		}
 
-		if strings.HasPrefix(rawGrant, "REVOKE") {
-			log.Printf("[WARN] Partial revokes are not fully supported and lead to unexpected behavior. Consult documentation https://dev.mysql.com/doc/refman/8.0/en/partial-revokes.html on how to disable them for safe and reliable terraform. Relevant partial revoke: %s\n", rawGrant)
+		parsedGrant, err := parseGrantFromRow(rawGrant)
+		if err != nil {
+			return nil, err
+		}
+		if parsedGrant == nil {
 			continue
 		}
 
-		if m := re.FindStringSubmatch(rawGrant); len(m) == 5 {
-			privsStr := m[1]
-			privList := extractPermTypes(privsStr)
-			privileges := make([]string, len(privList))
-
-			for i, priv := range privList {
-				privileges[i] = strings.TrimSpace(priv)
-			}
-			grantUserHost := m[4]
-			if normalizeUserHost(grantUserHost) != normalizeUserHost(user) {
-				// Percona returns also grants for % if we requested IP.
-				// Skip them as we don't want terraform to consider it.
-				log.Printf("[DEBUG] Skipping grant with host %v while we want %v", grantUserHost, user)
-				continue
-			}
-
-			grant := &MySQLGrant{
-				Database:   strings.Trim(m[2], "`\""),
-				Table:      strings.Trim(m[3], "`\""),
-				Privileges: privileges,
-				Grant:      reGrant.MatchString(rawGrant),
-			}
-
-			if len(privileges) > 0 {
-				grants = append(grants, grant)
-			}
-
-		} else if m := reRole.FindStringSubmatch(rawGrant); len(m) == 2 {
-			roleStr := m[1]
-			rolesStart := strings.Split(roleStr, ",")
-			roles := make([]string, len(rolesStart))
-
-			for i, role := range rolesStart {
-				roles[i] = strings.Trim(role, "`@%\" ")
-			}
-
-			grant := &MySQLGrant{
-				Roles: roles,
-				Grant: reGrant.MatchString(rawGrant),
-			}
-
-			grants = append(grants, grant)
-		} else {
-			return nil, fmt.Errorf("failed to parse grant statement: %s", rawGrant)
+		// Filter out any grants that don't match the provided user
+		// Percona returns also grants for % if we requested IP.
+		// Skip them as we don't want terraform to consider it.
+		if parsedGrant.GetUserOrRole().SQLString() != userOrRole.SQLString() {
+			log.Printf("[DEBUG] Skipping grant for %s as it doesn't match %s", parsedGrant.GetUserOrRole().SQLString(), userOrRole.SQLString())
+			continue
 		}
-	}
+		grants = append(grants, parsedGrant)
 
+	}
 	log.Printf("[DEBUG] Parsed grants are: %v", grants)
 	return grants, nil
-}
-
-func normalizeUserHost(userHost string) string {
-	if !strings.Contains(userHost, "@") {
-		userHost = fmt.Sprint(userHost, "@%")
-	}
-	withoutQuotes := strings.ReplaceAll(userHost, "'", "")
-	withoutBackticks := strings.ReplaceAll(withoutQuotes, "`", "")
-	withoutDblQuotes := strings.ReplaceAll(withoutBackticks, "\"", "")
-	return withoutDblQuotes
 }
 
 func removeUselessPerms(grants []string) []string {
