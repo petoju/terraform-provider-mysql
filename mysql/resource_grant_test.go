@@ -365,12 +365,17 @@ func testAccPrivilege(rn string, privilege string, expectExists bool) resource.T
 
 		id := strings.Split(rs.Primary.ID, ":")
 
-		var userOrRole string
+		var userOrRole UserOrRole
 		if strings.Contains(id[0], "@") {
 			parts := strings.Split(id[0], "@")
-			userOrRole = fmt.Sprintf("'%s'@'%s'", parts[0], parts[1])
+			userOrRole = UserOrRole{
+				Name: parts[0],
+				Host: parts[1],
+			}
 		} else {
-			userOrRole = fmt.Sprintf("'%s'", id[0])
+			userOrRole = UserOrRole{
+				Name: id[0],
+			}
 		}
 
 		grants, err := showUserGrants(context.Background(), db, userOrRole)
@@ -384,8 +389,12 @@ func testAccPrivilege(rn string, privilege string, expectExists bool) resource.T
 
 	Outer:
 		for _, grant := range grants {
-			privs := normalizePerms(grant.Privileges)
-			for _, priv := range privs {
+			grantWithPrivs, ok := grant.(MySQLGrantWithPrivileges)
+			if !ok {
+				continue
+			}
+			for _, priv := range grantWithPrivs.GetPrivileges() {
+				log.Printf("[DEBUG] Checking grant %s against %s", priv, privilegeNorm)
 				if priv == privilegeNorm {
 					haveGrant = true
 					break Outer
@@ -397,7 +406,7 @@ func testAccPrivilege(rn string, privilege string, expectExists bool) resource.T
 			if haveGrant {
 				return fmt.Errorf("grant %s found but it was not requested for %s", privilege, userOrRole)
 			} else {
-				return fmt.Errorf("grant %s not found for %s", privilege, userOrRole)
+				return fmt.Errorf("grant %s not found for %s", privilegeNorm, userOrRole)
 			}
 		}
 
@@ -818,7 +827,7 @@ func TestAccGrantOnProcedure(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s.%s", dbName, procedureName)),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"), // Ensure table attribute is * for procedures
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"), // Ensure table attribute is empty for procedures
 				),
 			},
 		},
