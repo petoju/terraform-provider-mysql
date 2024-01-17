@@ -742,3 +742,161 @@ func testAccGrantConfigComplexRoleGrants(user string) string {
 		privileges = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "RELOAD", "PROCESS", "REFERENCES", "INDEX", "ALTER", "SHOW DATABASES", "CREATE TEMPORARY TABLES", "LOCK TABLES", "EXECUTE", "REPLICATION SLAVE", "REPLICATION CLIENT", "CREATE VIEW", "SHOW VIEW", "CREATE ROUTINE", "ALTER ROUTINE", "CREATE USER", "EVENT", "TRIGGER"]
 	}`, user)
 }
+func prepareProcedure(dbname string, procedureName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+
+		// Switch to the specified database
+		_, err = db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbname))
+		if err != nil {
+			return fmt.Errorf("Error selecting database %s: %s", dbname, err)
+		}
+
+		// Check if the procedure exists
+		var exists int
+		checkExistenceSQL := fmt.Sprintf(`
+SELECT COUNT(*)
+FROM information_schema.ROUTINES
+WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ? AND ROUTINE_TYPE = 'PROCEDURE'
+`)
+		err = db.QueryRowContext(ctx, checkExistenceSQL, dbname, procedureName).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("Error checking existence of procedure %s: %s", procedureName, err)
+		}
+
+		if exists > 0 {
+			return nil
+		}
+
+		// Create the procedure
+		createProcedureSQL := fmt.Sprintf(`
+			CREATE PROCEDURE %s()
+			BEGIN
+				SELECT 1;
+			END
+			`, procedureName)
+		if _, err := db.Exec(createProcedureSQL); err != nil {
+			return fmt.Errorf("error reading grant: %s", err)
+		}
+		return nil
+	}
+}
+
+func TestAccGrantOnProcedure(t *testing.T) {
+	procedureName := "test_procedure"
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	userName := fmt.Sprintf("jdoe-%s", dbName)
+	hostName := "%"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheckSkipTiDB(t); testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				// Create table first
+				Config: testAccGrantConfigNoGrant(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					prepareTable(dbName),
+				),
+			},
+			{
+				// Create a procedure
+				Config: testAccGrantConfigNoGrant(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					prepareProcedure(dbName, procedureName),
+				),
+			},
+			{
+				Config: testAccGrantConfigProcedure(procedureName, dbName, hostName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckProcedureGrant("mysql_grant.test_procedure", userName, hostName, procedureName, true),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s.%s", dbName, procedureName)),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"), // Ensure table attribute is * for procedures
+				),
+			},
+		},
+	})
+}
+
+func testAccGrantConfigProcedure(procedureName string, dbName string, hostName string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user     = "jdoe-%s"
+  host     = "example.com"
+}
+
+resource "mysql_user" "test_global" {
+  user     = "jdoe-%s"
+  host     = "%%"
+}
+
+resource "mysql_grant" "test_procedure" {
+    user       = "jdoe-%s"
+    host       = "%s"
+    privileges = ["EXECUTE"]
+    database   = "PROCEDURE %s.%s"
+}
+`, dbName, dbName, dbName, dbName, hostName, dbName, procedureName)
+}
+
+func testAccCheckProcedureGrant(resourceName, userName, hostName, procedureName string, expected bool) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		// Obtain the database connection from the Terraform provider
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+
+		// Query to show grants for the specific user
+		query := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", userName, hostName)
+
+		// Use db.Query to execute the query
+		rows, err := db.Query(query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		// Variable to track if the required privilege is found
+		found := false
+
+		// Iterate through the results
+		for rows.Next() {
+			var grant string
+			if err := rows.Scan(&grant); err != nil {
+				return err
+			}
+
+			// Check if the grant string contains the necessary privilege
+			// Adjust the following line according to the exact format of your GRANT statement
+			if strings.Contains(grant, fmt.Sprintf("`%s`", procedureName)) && strings.Contains(grant, "EXECUTE") {
+				found = true
+				break
+			}
+		}
+
+		// Check if there was an error during iteration
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		// Compare the result with the expected outcome
+		if found != expected {
+			return fmt.Errorf("Grant for procedure %s does not match expected state: %v", procedureName, expected)
+		}
+
+		return nil
+	}
+}
