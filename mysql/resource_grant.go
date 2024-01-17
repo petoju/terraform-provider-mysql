@@ -711,7 +711,7 @@ func hasConflictingGrants(ctx context.Context, db *sql.DB, desiredGrant MySQLGra
 }
 
 var (
-	kUserOrRoleRegex = regexp.MustCompile("['`]?([^'`]+)['`]?@['`]?([^'`]+)?['`]?")
+	kUserOrRoleRegex = regexp.MustCompile("['`]?([^'`]+)['`]?(?:@['`]?([^'`]+)['`]?)?")
 )
 
 func parseUserOrRoleFromRow(userOrRoleStr string) (*UserOrRole, error) {
