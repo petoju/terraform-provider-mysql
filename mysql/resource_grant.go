@@ -203,10 +203,11 @@ func (t *ProcedurePrivilegeGrant) SQLRevokeStatement() string {
 }
 
 func (t *ProcedurePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
-	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privilegesToRevoke, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	privs := privilegesToRevoke
 	if t.Grant {
-		stmt += " WITH GRANT OPTION"
+		privs = append(privs, "GRANT OPTION")
 	}
+	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
 	return stmt
 }
 
