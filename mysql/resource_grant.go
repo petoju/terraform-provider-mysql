@@ -103,10 +103,11 @@ func (t *TablePrivilegeGrant) GrantOption() bool {
 }
 
 func (t *TablePrivilegeGrant) GetDatabase() string {
-	if strings.Compare(t.Database, "*") != 0 && !strings.HasSuffix(t.Database, "`") {
+	if t.Database == "*" {
+		return "*"
+	} else {
 		return fmt.Sprintf("`%s`", t.Database)
 	}
-	return t.Database
 }
 
 func (t *TablePrivilegeGrant) GetTable() string {
@@ -133,14 +134,18 @@ func (t *TablePrivilegeGrant) SQLGrantStatement() string {
 }
 
 func (t *TablePrivilegeGrant) SQLRevokeStatement() string {
-	return fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(t.Privileges, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
+	privs := t.Privileges
+	if t.Grant {
+		privs = append(privs, "GRANT OPTION")
+	}
+	return fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privs, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
 }
 
 func (t *TablePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
-	stmt := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privilegesToRevoke, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
 	if t.Grant {
-		stmt += " WITH GRANT OPTION"
+		privilegesToRevoke = append(privilegesToRevoke, "GRANT OPTION")
 	}
+	stmt := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privilegesToRevoke, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
 	return stmt
 }
 
@@ -189,10 +194,11 @@ func (t *ProcedurePrivilegeGrant) SQLGrantStatement() string {
 }
 
 func (t *ProcedurePrivilegeGrant) SQLRevokeStatement() string {
-	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(t.Privileges, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	privs := t.Privileges
 	if t.Grant {
-		stmt += " WITH GRANT OPTION"
+		privs = append(privs, "GRANT OPTION")
 	}
+	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
 	return stmt
 }
 
