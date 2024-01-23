@@ -75,6 +75,52 @@ func TestAccGrantWithGrantOption(t *testing.T) {
 	})
 }
 
+func TestAccRevokePrivRefresh(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGrantConfigBasic(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "UPDATE", true, false),
+				),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeTestCheckFunc(
+					revokeUserPrivs(dbName, "UPDATE"),
+				),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "UPDATE", false, false),
+				),
+			},
+			{
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+				Config:             testAccGrantConfigBasic(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "UPDATE", false, false),
+				),
+			},
+			{
+				Config: testAccGrantConfigBasic(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "UPDATE", true, false),
+				),
+			},
+		},
+	})
+}
+
 func TestAccBroken(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{
@@ -344,6 +390,16 @@ func prepareTable(dbname string) resource.TestCheckFunc {
 		}
 		if _, err := db.Exec(fmt.Sprintf("CREATE TABLE `%s`.`tbl`(c1 INT, c2 INT, c3 INT,c4 INT,c5 INT);", dbname)); err != nil {
 			return fmt.Errorf("error reading grant: %s", err)
+		}
+		return nil
+	}
+}
+
+func testResourceNotDefined(rn string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		_, ok := s.RootModule().Resources[rn]
+		if ok {
+			return fmt.Errorf("resource found, but not expected: %s", rn)
 		}
 		return nil
 	}
@@ -770,6 +826,7 @@ func prepareProcedure(dbname string, procedureName string) resource.TestCheckFun
 
 		// Switch to the specified database
 		_, err = db.ExecContext(ctx, fmt.Sprintf("USE `%s`", dbname))
+		log.Printf("[DEBUG] SQL: %s", dbname)
 		if err != nil {
 			return fmt.Errorf("Error selecting database %s: %s", dbname, err)
 		}
@@ -781,6 +838,7 @@ SELECT COUNT(*)
 FROM information_schema.ROUTINES
 WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ? AND ROUTINE_TYPE = 'PROCEDURE'
 `)
+		log.Printf("[DEBUG] SQL: %s", checkExistenceSQL)
 		err = db.QueryRowContext(ctx, checkExistenceSQL, dbname, procedureName).Scan(&exists)
 		if err != nil {
 			return fmt.Errorf("Error checking existence of procedure %s: %s", procedureName, err)
@@ -797,6 +855,7 @@ WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ? AND ROUTINE_TYPE = 'PROCEDURE'
 				SELECT 1;
 			END
 			`, procedureName)
+		log.Printf("[DEBUG] SQL: %s", createProcedureSQL)
 		if _, err := db.Exec(createProcedureSQL); err != nil {
 			return fmt.Errorf("error reading grant: %s", err)
 		}
@@ -830,20 +889,62 @@ func TestAccGrantOnProcedure(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccGrantConfigProcedure(procedureName, dbName, hostName),
+				Config: testAccGrantConfigProcedureWithTable(procedureName, dbName, hostName),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckProcedureGrant("mysql_grant.test_procedure", userName, hostName, procedureName, true),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
+					// Note: The database and table name do not change. This is to preserve legacy functionality.
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s", dbName)),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", procedureName),
+				),
+			},
+			{
+				// Remove the grant
+				Config: testAccGrantConfigNoGrant(dbName),
+			},
+			{
+				Config: testAccGrantConfigProcedureWithDatabase(procedureName, dbName, hostName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckProcedureGrant("mysql_grant.test_procedure", userName, hostName, procedureName, true),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
+					// Note: The database and table name do not change. This is to preserve legacy functionality.
 					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s.%s", dbName, procedureName)),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"), // Ensure table attribute is empty for procedures
+					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", "*"),
 				),
 			},
 		},
 	})
 }
 
-func testAccGrantConfigProcedure(procedureName string, dbName string, hostName string) string {
+func testAccGrantConfigProcedureWithTable(procedureName string, dbName string, hostName string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user     = "jdoe-%s"
+  host     = "example.com"
+}
+
+resource "mysql_user" "test_global" {
+  user     = "jdoe-%s"
+  host     = "%%"
+}
+
+resource "mysql_grant" "test_procedure" {
+    user       = "jdoe-%s"
+    host       = "%s"
+    privileges = ["EXECUTE"]
+    database   = "PROCEDURE %s"
+	table 	   = "%s"
+}
+`, dbName, dbName, dbName, dbName, hostName, dbName, procedureName)
+}
+
+func testAccGrantConfigProcedureWithDatabase(procedureName string, dbName string, hostName string) string {
 	return fmt.Sprintf(`
 resource "mysql_database" "test" {
   name = "%s"
@@ -879,6 +980,7 @@ func testAccCheckProcedureGrant(resourceName, userName, hostName, procedureName 
 
 		// Query to show grants for the specific user
 		query := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", userName, hostName)
+		log.Printf("[DEBUG] SQL: %s", query)
 
 		// Use db.Query to execute the query
 		rows, err := db.Query(query)
@@ -915,6 +1017,24 @@ func testAccCheckProcedureGrant(resourceName, userName, hostName, procedureName 
 			return fmt.Errorf("Grant for procedure %s does not match expected state: %v", procedureName, expected)
 		}
 
+		return nil
+	}
+}
+
+func revokeUserPrivs(dbname string, privs string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+
+		// Revoke privileges for this user
+		revokeAllSql := fmt.Sprintf("REVOKE %s ON `%s`.* FROM `jdoe-%s`@`example.com`;", privs, dbname, dbname)
+		log.Printf("[DEBUG] SQL: %s", revokeAllSql)
+		if _, err := db.Exec(revokeAllSql); err != nil {
+			return fmt.Errorf("error revoking grant: %s", err)
+		}
 		return nil
 	}
 }

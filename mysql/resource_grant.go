@@ -46,6 +46,42 @@ type MySQLGrantWithTable interface {
 type MySQLGrantWithPrivileges interface {
 	MySQLGrant
 	GetPrivileges() []string
+	AppendPrivileges([]string)
+}
+
+type MySQLGrantWithRoles interface {
+	MySQLGrant
+	GetRoles() []string
+	AppendRoles([]string)
+}
+
+func grantsConflict(grantA MySQLGrant, grantB MySQLGrant) bool {
+	if reflect.TypeOf(grantA) != reflect.TypeOf(grantB) {
+		return false
+	}
+	grantAWithDatabase, aOk := grantA.(MySQLGrantWithDatabase)
+	grantBWithDatabase, bOk := grantB.(MySQLGrantWithDatabase)
+	if aOk != bOk {
+		return false
+	}
+	if aOk && bOk {
+		if grantAWithDatabase.GetDatabase() != grantBWithDatabase.GetDatabase() {
+			return false
+		}
+	}
+
+	grantAWithTable, aOk := grantA.(MySQLGrantWithTable)
+	grantBWithTable, bOk := grantB.(MySQLGrantWithTable)
+	if aOk != bOk {
+		return false
+	}
+	if aOk && bOk {
+		if grantAWithTable.GetTable() != grantBWithTable.GetTable() {
+			return false
+		}
+	}
+
+	return true
 }
 
 type PrivilegesPartiallyRevocable interface {
@@ -122,6 +158,10 @@ func (t *TablePrivilegeGrant) GetPrivileges() []string {
 	return t.Privileges
 }
 
+func (t *TablePrivilegeGrant) AppendPrivileges(privs []string) {
+	t.Privileges = append(t.Privileges, privs...)
+}
+
 func (t *TablePrivilegeGrant) SQLGrantStatement() string {
 	stmtSql := fmt.Sprintf("GRANT %s ON %s.%s TO %s", strings.Join(t.Privileges, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
 	if t.TLSOption != "" && strings.ToLower(t.TLSOption) != "none" {
@@ -178,12 +218,20 @@ func (t *ProcedurePrivilegeGrant) GetDatabase() string {
 	return t.Database
 }
 
+func (t *ProcedurePrivilegeGrant) GetCallableName() string {
+	return fmt.Sprintf("`%s`", t.CallableName)
+}
+
 func (t *ProcedurePrivilegeGrant) GetPrivileges() []string {
 	return t.Privileges
 }
 
+func (t *ProcedurePrivilegeGrant) AppendPrivileges(privs []string) {
+	t.Privileges = append(t.Privileges, privs...)
+}
+
 func (t *ProcedurePrivilegeGrant) SQLGrantStatement() string {
-	stmtSql := fmt.Sprintf("GRANT %s ON %s %s.%s TO %s", strings.Join(t.Privileges, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	stmtSql := fmt.Sprintf("GRANT %s ON %s %s.%s TO %s", strings.Join(t.Privileges, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
 	if t.TLSOption != "" && strings.ToLower(t.TLSOption) != "none" {
 		stmtSql += fmt.Sprintf(" REQUIRE %s", t.TLSOption)
 	}
@@ -198,7 +246,7 @@ func (t *ProcedurePrivilegeGrant) SQLRevokeStatement() string {
 	if t.Grant {
 		privs = append(privs, "GRANT OPTION")
 	}
-	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
 	return stmt
 }
 
@@ -207,7 +255,7 @@ func (t *ProcedurePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privileges
 	if t.Grant {
 		privs = append(privs, "GRANT OPTION")
 	}
-	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
 	return stmt
 }
 
@@ -243,6 +291,14 @@ func (t *RoleGrant) SQLGrantStatement() string {
 
 func (t *RoleGrant) SQLRevokeStatement() string {
 	return fmt.Sprintf("REVOKE %s FROM %s", strings.Join(t.Roles, ", "), t.UserOrRole.SQLString())
+}
+
+func (t *RoleGrant) GetRoles() []string {
+	return t.Roles
+}
+
+func (t *RoleGrant) AppendRoles(roles []string) {
+	t.Roles = append(t.Roles, roles...)
 }
 
 func resourceGrant() *schema.Resource {
@@ -438,7 +494,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	}
 
 	// Check to see if there are existing roles that might be clobbered by this grant
-	conflictingGrant, err := hasConflictingGrants(ctx, db, grant)
+	conflictingGrant, err := getMatchingGrant(ctx, db, grant)
 	if err != nil {
 		return diag.Errorf("failed showing grants: %v", err)
 	}
@@ -464,23 +520,22 @@ func ReadGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) di
 		return diag.Errorf("failed getting database from Meta: %v", err)
 	}
 
-	grant, diagErr := parseResourceFromData(d)
+	grantFromTf, diagErr := parseResourceFromData(d)
 	if diagErr != nil {
 		return diagErr
 	}
 
-	allGrants, err := showUserGrants(ctx, db, grant.GetUserOrRole())
+	grantFromDb, err := getMatchingGrant(ctx, db, grantFromTf)
 	if err != nil {
 		return diag.Errorf("ReadGrant - getting all grants failed: %v", err)
 	}
-
-	if len(allGrants) == 0 {
-		log.Printf("[WARN] GRANT not found for %s - removing from state", grant.GetUserOrRole())
+	if grantFromDb == nil {
+		log.Printf("[WARN] GRANT not found for %s - removing from state", grantFromTf.GetUserOrRole())
 		d.SetId("")
 		return nil
 	}
 
-	setDataFromGrant(grant, d)
+	setDataFromGrant(grantFromDb, d)
 
 	return nil
 }
@@ -599,41 +654,33 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	database := userHostDatabaseTable[2]
 	table := userHostDatabaseTable[3]
 	grantOption := len(userHostDatabaseTable) == 5
-
 	userOrRole := UserOrRole{
 		Name: user,
 		Host: host,
 	}
 
+	desiredGrant := &TablePrivilegeGrant{
+		Database:   database,
+		Table:      table,
+		Grant:      grantOption,
+		UserOrRole: userOrRole,
+	}
+
 	db, err := getDatabaseFromMeta(ctx, meta)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Got error while getting database from meta: %w", err)
 	}
 
 	grants, err := showUserGrants(ctx, db, userOrRole)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to showUserGrants in import: %w", err)
 	}
-	for _, grant := range grants {
-		// Grant options must match
-		if grant.GrantOption() != grantOption {
-			continue
+	for _, foundGrant := range grants {
+		if grantsConflict(desiredGrant, foundGrant) {
+			res := resourceGrant().Data(nil)
+			setDataFromGrant(foundGrant, res)
+			return []*schema.ResourceData{res}, nil
 		}
-
-		// If we have a database grant, we need to match the database name
-		if dbGrant, ok := grant.(MySQLGrantWithDatabase); (!ok && database != "") || (ok && dbGrant.GetDatabase() != database) {
-			continue
-		}
-
-		// If we have a table grant, we need to match the table name
-		if tableGrant, ok := grant.(MySQLGrantWithTable); (!ok && table != "") || (ok && tableGrant.GetTable() != table) {
-			continue
-		}
-
-		// We have a match!
-		res := resourceGrant().Data(nil)
-		setDataFromGrant(grant, res)
-		return []*schema.ResourceData{res}, nil
 	}
 
 	// No match found
@@ -642,16 +689,16 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 }
 
 // setDataFromGrant copies the values from MySQLGrant to the schema.ResourceData
+// This function is used when importing a new Grant, or when syncing remote state to Terraform state
+// It is responsible for pulling any non-identifying properties (e.g. grant, tls_option) into the Terraform state
+// Identifying properties (database, table) are already set either as part of the import id or required properties
+// of the Terraform resource.
 func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.ResourceData {
-
 	if tableGrant, ok := grant.(*TablePrivilegeGrant); ok {
-		d.Set("database", tableGrant.Database)
 		d.Set("grant", grant.GrantOption())
 		d.Set("tls_option", tableGrant.TLSOption)
 
 	} else if procedureGrant, ok := grant.(*ProcedurePrivilegeGrant); ok {
-		d.Set("database", fmt.Sprintf("%s %s.%s", procedureGrant.ObjectT, procedureGrant.Database, procedureGrant.CallableName))
-		d.Set("table", "*")
 		d.Set("grant", grant.GrantOption())
 		d.Set("tls_option", procedureGrant.TLSOption)
 
@@ -690,31 +737,58 @@ func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.Resource
 	return d
 }
 
-func hasConflictingGrants(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) (MySQLGrant, error) {
+func combineGrants(grantA MySQLGrant, grantB MySQLGrant) (MySQLGrant, error) {
+	// Check if the grants cover the same user, table, database
+	// If not, throw an error because they are unmergeable
+	if !grantsConflict(grantA, grantB) {
+		return nil, fmt.Errorf("Unable to combine MySQLGrant %s with %s because they don't cover the same table/database/user", grantA, grantB)
+	}
+
+	// We can combine grants with privileges
+	grantAWithPrivileges, aOk := grantA.(MySQLGrantWithPrivileges)
+	grantBWithPrivileges, bOk := grantB.(MySQLGrantWithPrivileges)
+	if aOk && bOk {
+		grantAWithPrivileges.AppendPrivileges(grantBWithPrivileges.GetPrivileges())
+		return grantA, nil
+	}
+
+	// We can combine grants with roles
+	grantAWithRoles, aOk := grantA.(MySQLGrantWithRoles)
+	grantBWithRoles, bOk := grantB.(MySQLGrantWithRoles)
+	if aOk && bOk {
+		grantAWithRoles.AppendRoles(grantBWithRoles.GetRoles())
+		return grantA, nil
+	}
+
+	return nil, fmt.Errorf("Unable to combine MySQLGrant %s of type %T with %s of type %T", grantA, grantA, grantB, grantB)
+}
+
+func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) (MySQLGrant, error) {
 	allGrants, err := showUserGrants(ctx, db, desiredGrant.GetUserOrRole())
+	var result MySQLGrant
 	if err != nil {
 		return nil, fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
 	for _, dbGrant := range allGrants {
-		if desiredGrant.GrantOption() != dbGrant.GrantOption() {
+
+		// Check if the grants cover the same user, table, database
+		// If not, continue
+		if !grantsConflict(desiredGrant, dbGrant) {
 			continue
 		}
-		if reflect.TypeOf(desiredGrant) != reflect.TypeOf(dbGrant) {
-			continue
-		}
-		if grantWithDatabase, ok := desiredGrant.(MySQLGrantWithDatabase); ok {
-			if grantWithDatabase.GetDatabase() != dbGrant.(MySQLGrantWithDatabase).GetDatabase() {
-				continue
+
+		// For some reason, MySQL separates privileges into multiple lines
+		// So to normalize them, we need to combine them into a single MySQLGrant
+		if result != nil {
+			result, err = combineGrants(result, dbGrant)
+			if err != nil {
+				return nil, fmt.Errorf("Failed to combine grants in getMatchingGrant: %w", err)
 			}
+		} else {
+			result = dbGrant
 		}
-		if grantWithTable, ok := desiredGrant.(MySQLGrantWithTable); ok {
-			if grantWithTable.GetTable() != dbGrant.(MySQLGrantWithTable).GetTable() {
-				continue
-			}
-		}
-		return dbGrant, nil
 	}
-	return nil, nil
+	return result, nil
 }
 
 var (
@@ -768,7 +842,7 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 	}
 
 	// Parse Require Statement
-	tlsOption := ""
+	tlsOption := "NONE"
 	if requireMatches := kRequireRegex.FindStringSubmatch(grantStr); len(requireMatches) == 2 {
 		tlsOption = requireMatches[1]
 	}
@@ -785,12 +859,12 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 
 		userOrRole, err := parseUserOrRoleFromRow(procedureMatches[4])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Failed to parseUserOrRole for procedure grant: %w", err)
 		}
 
 		database, callable, err := parseDatabaseQualifiedObject(procedureMatches[3])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Failed to parseDatabaseQualifiedObject for procedure grant: %w", err)
 		}
 
 		grant := &ProcedurePrivilegeGrant{
@@ -816,12 +890,12 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 
 		userOrRole, err := parseUserOrRoleFromRow(tableMatches[3])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Failed to parseUserOrRole for table grant: %w", err)
 		}
 
 		database, table, err := parseDatabaseQualifiedObject(tableMatches[2])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Failed to parseDatabaseQualifiedObject for table grant: %w", err)
 		}
 
 		grant := &TablePrivilegeGrant{
@@ -844,7 +918,7 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 
 		userOrRole, err := parseUserOrRoleFromRow(roleMatches[2])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Failed to parseUserOrRole for role grant: %w", err)
 		}
 
 		grant := &RoleGrant{
@@ -887,7 +961,7 @@ func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]M
 
 		parsedGrant, err := parseGrantFromRow(rawGrant)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Failed to parseGrantFromRow: %w", err)
 		}
 		if parsedGrant == nil {
 			continue
@@ -991,6 +1065,9 @@ func normalizePerms(perms []string) []string {
 
 	// Remove useless perms
 	ret = removeUselessPerms(ret)
+
+	// Sort permissions
+	sort.Strings(ret)
 
 	return ret
 }
