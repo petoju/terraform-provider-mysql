@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,16 +17,232 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
-type MySQLGrant struct {
+type ObjectT string
+
+var (
+	kProcedure ObjectT = "PROCEDURE"
+	kFunction  ObjectT = "FUNCTION"
+	kTable     ObjectT = "TABLE"
+)
+
+type MySQLGrant interface {
+	GetId() string
+	SQLGrantStatement() string
+	SQLRevokeStatement() string
+	GetUserOrRole() UserOrRole
+	GrantOption() bool
+}
+
+type MySQLGrantWithDatabase interface {
+	MySQLGrant
+	GetDatabase() string
+}
+
+type MySQLGrantWithTable interface {
+	MySQLGrantWithDatabase
+	GetTable() string
+}
+
+type MySQLGrantWithPrivileges interface {
+	MySQLGrant
+	GetPrivileges() []string
+}
+
+type PrivilegesPartiallyRevocable interface {
+	SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string
+}
+
+type UserOrRole struct {
+	Name string
+	Host string
+}
+
+func (u UserOrRole) IDString() string {
+	if u.Host == "" {
+		return u.Name
+	}
+	return fmt.Sprintf("%s@%s", u.Name, u.Host)
+}
+
+func (u UserOrRole) SQLString() string {
+	if u.Host == "" {
+		return fmt.Sprintf("'%s'", u.Name)
+	}
+	return fmt.Sprintf("'%s'@'%s'", u.Name, u.Host)
+}
+
+func (u UserOrRole) Equals(other UserOrRole) bool {
+	if u.Name != other.Name {
+		return false
+	}
+	if (u.Host == "" || u.Host == "%") && (other.Host == "" || other.Host == "%") {
+		return true
+	}
+	return u.Host == other.Host
+}
+
+type TablePrivilegeGrant struct {
 	Database   string
 	Table      string
 	Privileges []string
-	Roles      []string
 	Grant      bool
+	UserOrRole UserOrRole
+	TLSOption  string
 }
 
-func (m MySQLGrant) String() string {
-	return fmt.Sprintf("{Database=%v,Table=%v,Privileges=%v,Roles=%v,Grant=%v}", m.Database, m.Table, m.Privileges, m.Roles, m.Grant)
+func (t *TablePrivilegeGrant) GetId() string {
+	return fmt.Sprintf("%s:%s", t.UserOrRole.IDString(), t.GetDatabase())
+}
+
+func (t *TablePrivilegeGrant) GetUserOrRole() UserOrRole {
+	return t.UserOrRole
+}
+
+func (t *TablePrivilegeGrant) GrantOption() bool {
+	return t.Grant
+}
+
+func (t *TablePrivilegeGrant) GetDatabase() string {
+	if t.Database == "*" {
+		return "*"
+	} else {
+		return fmt.Sprintf("`%s`", t.Database)
+	}
+}
+
+func (t *TablePrivilegeGrant) GetTable() string {
+	if t.Table == "*" || t.Table == "" {
+		return "*"
+	} else {
+		return fmt.Sprintf("`%s`", t.Table)
+	}
+}
+
+func (t *TablePrivilegeGrant) GetPrivileges() []string {
+	return t.Privileges
+}
+
+func (t *TablePrivilegeGrant) SQLGrantStatement() string {
+	stmtSql := fmt.Sprintf("GRANT %s ON %s.%s TO %s", strings.Join(t.Privileges, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
+	if t.TLSOption != "" && strings.ToLower(t.TLSOption) != "none" {
+		stmtSql += fmt.Sprintf(" REQUIRE %s", t.TLSOption)
+	}
+	if t.Grant {
+		stmtSql += " WITH GRANT OPTION"
+	}
+	return stmtSql
+}
+
+func (t *TablePrivilegeGrant) SQLRevokeStatement() string {
+	privs := t.Privileges
+	if t.Grant {
+		privs = append(privs, "GRANT OPTION")
+	}
+	return fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privs, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
+}
+
+func (t *TablePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
+	if t.Grant {
+		privilegesToRevoke = append(privilegesToRevoke, "GRANT OPTION")
+	}
+	stmt := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privilegesToRevoke, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
+	return stmt
+}
+
+type ProcedurePrivilegeGrant struct {
+	Database     string
+	ObjectT      ObjectT
+	CallableName string
+	Privileges   []string
+	Grant        bool
+	UserOrRole   UserOrRole
+	TLSOption    string
+}
+
+func (t *ProcedurePrivilegeGrant) GetId() string {
+	return fmt.Sprintf("%s:%s", t.UserOrRole.IDString(), t.GetDatabase())
+}
+
+func (t *ProcedurePrivilegeGrant) GetUserOrRole() UserOrRole {
+	return t.UserOrRole
+}
+
+func (t *ProcedurePrivilegeGrant) GrantOption() bool {
+	return t.Grant
+}
+
+func (t *ProcedurePrivilegeGrant) GetDatabase() string {
+	if strings.Compare(t.Database, "*") != 0 && !strings.HasSuffix(t.Database, "`") {
+		return fmt.Sprintf("`%s`", t.Database)
+	}
+	return t.Database
+}
+
+func (t *ProcedurePrivilegeGrant) GetPrivileges() []string {
+	return t.Privileges
+}
+
+func (t *ProcedurePrivilegeGrant) SQLGrantStatement() string {
+	stmtSql := fmt.Sprintf("GRANT %s ON %s %s.%s TO %s", strings.Join(t.Privileges, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	if t.TLSOption != "" && strings.ToLower(t.TLSOption) != "none" {
+		stmtSql += fmt.Sprintf(" REQUIRE %s", t.TLSOption)
+	}
+	if t.Grant {
+		stmtSql += " WITH GRANT OPTION"
+	}
+	return stmtSql
+}
+
+func (t *ProcedurePrivilegeGrant) SQLRevokeStatement() string {
+	privs := t.Privileges
+	if t.Grant {
+		privs = append(privs, "GRANT OPTION")
+	}
+	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	return stmt
+}
+
+func (t *ProcedurePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
+	privs := privilegesToRevoke
+	if t.Grant {
+		privs = append(privs, "GRANT OPTION")
+	}
+	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.CallableName, t.UserOrRole.SQLString())
+	return stmt
+}
+
+type RoleGrant struct {
+	Roles      []string
+	Grant      bool
+	UserOrRole UserOrRole
+	TLSOption  string
+}
+
+func (t *RoleGrant) GetId() string {
+	return fmt.Sprintf("%s", t.UserOrRole.IDString())
+}
+
+func (t *RoleGrant) GetUserOrRole() UserOrRole {
+	return t.UserOrRole
+}
+
+func (t *RoleGrant) GrantOption() bool {
+	return t.Grant
+}
+
+func (t *RoleGrant) SQLGrantStatement() string {
+	stmtSql := fmt.Sprintf("GRANT %s TO %s", strings.Join(t.Roles, ", "), t.UserOrRole.SQLString())
+	if t.TLSOption != "" && strings.ToLower(t.TLSOption) != "none" {
+		stmtSql += fmt.Sprintf(" REQUIRE %s", t.TLSOption)
+	}
+	if t.Grant {
+		stmtSql += " WITH ADMIN OPTION"
+	}
+	return stmtSql
+}
+
+func (t *RoleGrant) SQLRevokeStatement() string {
+	return fmt.Sprintf("REVOKE %s FROM %s", strings.Join(t.Roles, ", "), t.UserOrRole.SQLString())
 }
 
 func resourceGrant() *schema.Resource {
@@ -108,51 +325,6 @@ func resourceGrant() *schema.Resource {
 	}
 }
 
-func flattenList(list []interface{}, template string) string {
-	var result []string
-	for _, v := range list {
-		result = append(result, fmt.Sprintf(template, v.(string)))
-	}
-
-	return strings.Join(result, ", ")
-}
-
-func formatDatabaseName(database string) string {
-	if strings.Compare(database, "*") != 0 && !strings.HasSuffix(database, "`") {
-		reProcedure := regexp.MustCompile(`(?i)^(function|procedure) (.*)$`)
-		if reProcedure.MatchString(database) {
-			// This is only a hack - user can specify function / procedure as database.
-			database = reProcedure.ReplaceAllString(database, "$1 `${2}`")
-		} else {
-			database = fmt.Sprintf("`%s`", database)
-		}
-	}
-
-	return database
-}
-
-func formatTableName(table string) string {
-	if table == "" || table == "*" {
-		return fmt.Sprintf("*")
-	}
-	return fmt.Sprintf("`%s`", table)
-}
-
-// Formats user/host or role. Returns the formatted string and whether it is role. And an error in case it's not supported.
-func userOrRole(user string, host string, role string, hasRoles bool) (string, bool, error) {
-	if len(user) > 0 && len(host) > 0 {
-		return fmt.Sprintf("'%s'@'%s'", user, host), false, nil
-	} else if len(role) > 0 {
-		if !hasRoles {
-			return "", false, fmt.Errorf("roles are only supported on MySQL 8 and above")
-		}
-
-		return fmt.Sprintf("'%s'", role), true, nil
-	} else {
-		return "", false, fmt.Errorf("user with host or a role is required")
-	}
-}
-
 func supportsRoles(ctx context.Context, meta interface{}) (bool, error) {
 	currentVersion := getVersionFromMeta(ctx, meta)
 
@@ -161,94 +333,120 @@ func supportsRoles(ctx context.Context, meta interface{}) (bool, error) {
 	return hasRoles, nil
 }
 
+var kReProcedureWithoutDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^.]*)$`)
+var kReProcedureWithDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^.]*)\.([^.]*)$`)
+
+func parseResourceFromData(d *schema.ResourceData) (MySQLGrant, diag.Diagnostics) {
+
+	// Step 1: Parse the user/role
+	var userOrRole UserOrRole
+	userAttr, userOk := d.GetOk("user")
+	hostAttr, hostOk := d.GetOk("host")
+	roleAttr, roleOk := d.GetOk("role")
+	if userOk && hostOk && userAttr.(string) != "" && hostAttr.(string) != "" {
+		userOrRole = UserOrRole{
+			Name: userAttr.(string),
+			Host: hostAttr.(string),
+		}
+	} else if roleOk && roleAttr.(string) != "" {
+		userOrRole = UserOrRole{
+			Name: roleAttr.(string),
+		}
+	} else {
+		return nil, diag.Errorf("One of user/host or role is required")
+	}
+
+	// Step 2: Get generic attributes
+	database := d.Get("database").(string)
+	tlsOption := d.Get("tls_option").(string)
+	grantOption := d.Get("grant").(bool)
+
+	// Step 3a: If `roles` is specified, we have a role grant
+	if attr, ok := d.GetOk("roles"); ok {
+		roles := setToArray(attr)
+		return &RoleGrant{
+			Roles:      roles,
+			Grant:      grantOption,
+			UserOrRole: userOrRole,
+			TLSOption:  tlsOption,
+		}, nil
+	}
+
+	// Step 3b. If the database is a procedure or function, we have a procedure grant
+	if kReProcedureWithDatabase.MatchString(database) || kReProcedureWithoutDatabase.MatchString(database) {
+		var callableType ObjectT
+		var callableName string
+		if kReProcedureWithDatabase.MatchString(database) {
+			matches := kReProcedureWithDatabase.FindStringSubmatch(database)
+			callableType = ObjectT(matches[1])
+			database = matches[2]
+			callableName = matches[3]
+		} else {
+			matches := kReProcedureWithoutDatabase.FindStringSubmatch(database)
+			callableType = ObjectT(matches[1])
+			database = matches[2]
+			callableName = d.Get("table").(string)
+		}
+
+		privsList := setToArray(d.Get("privileges"))
+		privileges := normalizePerms(privsList)
+
+		return &ProcedurePrivilegeGrant{
+			Database:     database,
+			ObjectT:      callableType,
+			CallableName: callableName,
+			Privileges:   privileges,
+			Grant:        grantOption,
+			UserOrRole:   userOrRole,
+			TLSOption:    tlsOption,
+		}, nil
+	}
+
+	// Step 3c. Otherwise, we have a table grant
+	privsList := setToArray(d.Get("privileges"))
+	privileges := normalizePerms(privsList)
+
+	return &TablePrivilegeGrant{
+		Database:   database,
+		Table:      d.Get("table").(string),
+		Privileges: privileges,
+		Grant:      grantOption,
+		UserOrRole: userOrRole,
+		TLSOption:  tlsOption,
+	}, nil
+}
+
 func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	db, err := getDatabaseFromMeta(ctx, meta)
 	if err != nil {
 		return diag.FromErr(err)
 	}
 
-	hasRoles, err := supportsRoles(ctx, meta)
+	// Parse the ResourceData
+	grant, diagErr := parseResourceFromData(d)
+	if err != nil {
+		return diagErr
+	}
+
+	// Determine whether the database has support for roles
+	hasRolesSupport, err := supportsRoles(ctx, meta)
 	if err != nil {
 		return diag.Errorf("failed getting role support: %v", err)
 	}
-
-	var (
-		privilegesOrRoles string
-		grantOn           string
-	)
-
-	hasPrivs := false
-	rolesGranted := 0
-	if attr, ok := d.GetOk("privileges"); ok {
-		privilegesOrRoles = flattenList(attr.(*schema.Set).List(), "%s")
-		hasPrivs = true
-	} else if attr, ok := d.GetOk("roles"); ok {
-		if !hasRoles {
-			return diag.Errorf("Roles are only supported on MySQL 8 and above")
-		}
-		listOfRoles := attr.(*schema.Set).List()
-		rolesGranted = len(listOfRoles)
-		privilegesOrRoles = flattenList(listOfRoles, "'%s'")
-	} else {
-		return diag.Errorf("One of privileges or roles is required")
+	if _, ok := grant.(*RoleGrant); ok && !hasRolesSupport {
+		return diag.Errorf("role grants are not supported by this version of MySQL")
 	}
 
-	user := d.Get("user").(string)
-	host := d.Get("host").(string)
-	role := d.Get("role").(string)
-	grantOption := d.Get("grant").(bool)
-
-	userOrRole, isRole, err := userOrRole(user, host, role, hasRoles)
-	if err != nil {
-		return diag.Errorf("failed getting whether it's user or a role: %v", err)
-	}
-	database := d.Get("database").(string)
-	table := d.Get("table").(string)
-
-	grant, err := showGrant(ctx, db, userOrRole, database, table, grantOption)
+	// Check to see if there are existing roles that might be clobbered by this grant
+	conflictingGrant, err := hasConflictingGrants(ctx, db, grant)
 	if err != nil {
 		return diag.Errorf("failed showing grants: %v", err)
 	}
-
-	if hasPrivs {
-		if len(grant.Privileges) >= 1 {
-			if grant.Database == database && grant.Table == table && grant.Grant == grantOption {
-				return diag.Errorf("user/role %s already has unmanaged grant to %s.%s - import it first", userOrRole, grant.Database, grant.Table)
-			}
-		}
-	} else {
-		if len(grant.Roles) >= 1 {
-			// Granting role is just role without DB & table.
-			if grant.Database == "" && grant.Table == "" && grant.Grant == grantOption {
-				return diag.Errorf("user/role %s already has unmanaged grant for roles %v - import it first", userOrRole, grant.Roles)
-			}
-		}
+	if conflictingGrant != nil {
+		return diag.Errorf("user/role %s already has unmanaged grant %v - import it first", grant.GetUserOrRole(), conflictingGrant)
 	}
 
-	// DB and table have to be wrapped in backticks in some cases.
-	databaseWrapped := formatDatabaseName(database)
-	tableWrapped := formatTableName(table)
-	if (!isRole || hasPrivs) && rolesGranted == 0 {
-		grantOn = fmt.Sprintf(" ON %s.%s", databaseWrapped, tableWrapped)
-	}
-
-	stmtSQL := fmt.Sprintf("GRANT %s%s TO %s",
-		privilegesOrRoles,
-		grantOn,
-		userOrRole)
-
-	// MySQL 8+ doesn't allow REQUIRE on a GRANT statement.
-	if !hasRoles && d.Get("tls_option").(string) != "" && strings.ToLower(d.Get("tls_option").(string)) != "none" {
-		stmtSQL += fmt.Sprintf(" REQUIRE %s", d.Get("tls_option").(string))
-	}
-
-	if d.Get("grant").(bool) {
-		if rolesGranted == 0 {
-			stmtSQL += " WITH GRANT OPTION"
-		} else {
-			stmtSQL += " WITH ADMIN OPTION"
-		}
-	}
+	stmtSQL := grant.SQLGrantStatement()
 
 	log.Println("Executing statement:", stmtSQL)
 	_, err = db.ExecContext(ctx, stmtSQL)
@@ -256,13 +454,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return diag.Errorf("Error running SQL (%s): %s", stmtSQL, err)
 	}
 
-	id := fmt.Sprintf("%s@%s:%s", user, host, databaseWrapped)
-	if isRole {
-		id = fmt.Sprintf("%s:%s", role, databaseWrapped)
-	}
-
-	d.SetId(id)
-
+	d.SetId(grant.GetId())
 	return ReadGrant(ctx, d, meta)
 }
 
@@ -272,60 +464,23 @@ func ReadGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) di
 		return diag.Errorf("failed getting database from Meta: %v", err)
 	}
 
-	hasRoles, err := supportsRoles(ctx, meta)
-	if err != nil {
-		return diag.Errorf("failed getting role support: %v", err)
-	}
-	userOrRole, _, err := userOrRole(
-		d.Get("user").(string),
-		d.Get("host").(string),
-		d.Get("role").(string),
-		hasRoles)
-	if err != nil {
-		return diag.Errorf("failed getting user or role: %v", err)
-	}
-	database := d.Get("database").(string)
-	table := d.Get("table").(string)
-	grantOption := d.Get("grant").(bool)
-	rolesSet := d.Get("roles").(*schema.Set)
-	rolesCount := len(rolesSet.List())
-
-	if rolesCount != 0 {
-		// For some reason, role can have still database / table, that
-		// makes no sense. Remove them when reading.
-		database = ""
-		table = ""
-	}
-	grant, err := showGrant(ctx, db, userOrRole, database, table, grantOption)
-
-	if err != nil {
-		return diag.Errorf("error reading grant for %s: %v", userOrRole, err)
+	grant, diagErr := parseResourceFromData(d)
+	if diagErr != nil {
+		return diagErr
 	}
 
-	if len(grant.Privileges) == 0 && len(grant.Roles) == 0 {
-		log.Printf("[WARN] GRANT not found for %s (%s) - removing from state", userOrRole, err)
+	allGrants, err := showUserGrants(ctx, db, grant.GetUserOrRole())
+	if err != nil {
+		return diag.Errorf("ReadGrant - getting all grants failed: %v", err)
+	}
+
+	if len(allGrants) == 0 {
+		log.Printf("[WARN] GRANT not found for %s - removing from state", grant.GetUserOrRole())
 		d.SetId("")
 		return nil
 	}
 
-	var privileges []string
-	var roles []string
-
-	if grant.Database == database && grant.Table == table {
-		privileges = makePrivs(setToArray(d.Get("privileges")), grant.Privileges)
-	}
-	// Granting role is just role without DB & table.
-	if grant.Database == "" && grant.Table == "" {
-		roles = grant.Roles
-	}
-
-	if grant.Grant {
-		grantOption = true
-	}
-
-	d.Set("privileges", privileges)
-	d.Set("roles", roles)
-	d.Set("grant", grantOption)
+	setDataFromGrant(grant, d)
 
 	return nil
 }
@@ -336,27 +491,17 @@ func UpdateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return diag.FromErr(err)
 	}
 
-	hasRoles, err := supportsRoles(ctx, meta)
-
-	if err != nil {
-		return diag.Errorf("failed getting role support: %v", err)
-	}
-
-	userOrRole, _, err := userOrRole(
-		d.Get("user").(string),
-		d.Get("host").(string),
-		d.Get("role").(string),
-		hasRoles)
-
 	if err != nil {
 		return diag.Errorf("failed getting user or role: %v", err)
 	}
 
-	database := d.Get("database").(string)
-	table := d.Get("table").(string)
-
 	if d.HasChange("privileges") {
-		err = updatePrivileges(ctx, d, db, userOrRole, database, table)
+		grant, diagErr := parseResourceFromData(d)
+		if diagErr != nil {
+			return diagErr
+		}
+
+		err = updatePrivileges(ctx, db, d, grant)
 		if err != nil {
 			return diag.Errorf("failed updating privileges: %v", err)
 		}
@@ -365,22 +510,27 @@ func UpdateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	return nil
 }
 
-func updatePrivileges(ctx context.Context, d *schema.ResourceData, db *sql.DB, user string, database string, table string) error {
+func updatePrivileges(ctx context.Context, db *sql.DB, d *schema.ResourceData, grant MySQLGrant) error {
 	oldPrivsIf, newPrivsIf := d.GetChange("privileges")
 	oldPrivs := oldPrivsIf.(*schema.Set)
 	newPrivs := newPrivsIf.(*schema.Set)
 	grantIfs := newPrivs.Difference(oldPrivs).List()
 	revokeIfs := oldPrivs.Difference(newPrivs).List()
 
-	if len(revokeIfs) > 0 {
-		revokes := make([]string, len(revokeIfs))
+	// Normalize the privileges to revoke
+	privsToRevoke := []string{}
+	for _, revokeIf := range revokeIfs {
+		privsToRevoke = append(privsToRevoke, revokeIf.(string))
+	}
+	privsToRevoke = normalizePerms(privsToRevoke)
 
-		for i, v := range revokeIfs {
-			revokes[i] = v.(string)
+	// Do a partial revoke of anything that has been removed
+	if len(privsToRevoke) > 0 {
+		partialRevoker, ok := grant.(PrivilegesPartiallyRevocable)
+		if !ok {
+			return fmt.Errorf("grant does not support partial privilege revokes")
 		}
-
-		sqlCommand := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(revokes, ","), formatDatabaseName(database), formatTableName(table), user)
-
+		sqlCommand := partialRevoker.SQLPartialRevokePrivilegesStatement(privsToRevoke)
 		log.Printf("[DEBUG] SQL: %s", sqlCommand)
 
 		if _, err := db.ExecContext(ctx, sqlCommand); err != nil {
@@ -388,15 +538,9 @@ func updatePrivileges(ctx context.Context, d *schema.ResourceData, db *sql.DB, u
 		}
 	}
 
+	// Do a full grant if anything has been added
 	if len(grantIfs) > 0 {
-		grants := make([]string, len(grantIfs))
-
-		for i, v := range grantIfs {
-			grants[i] = v.(string)
-		}
-
-		sqlCommand := fmt.Sprintf("GRANT %s ON %s.%s TO %s", strings.Join(grants, ","), formatDatabaseName(database), formatTableName(table), user)
-
+		sqlCommand := grant.SQLGrantStatement()
 		log.Printf("[DEBUG] SQL: %s", sqlCommand)
 
 		if _, err := db.ExecContext(ctx, sqlCommand); err != nil {
@@ -413,46 +557,17 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return diag.FromErr(err)
 	}
 
-	database := formatDatabaseName(d.Get("database").(string))
-	table := formatTableName(d.Get("table").(string))
-
-	hasRoles, err := supportsRoles(ctx, meta)
+	grant, diagErr := parseResourceFromData(d)
 	if err != nil {
-		return diag.Errorf("failed getting role support: %v", err)
+		return diagErr
 	}
 
-	userOrRole, _, err := userOrRole(
-		d.Get("user").(string),
-		d.Get("host").(string),
-		d.Get("role").(string),
-		hasRoles)
-	if err != nil {
-		return diag.Errorf("failed getting user or role: %v", err)
-	}
-
-	roles := d.Get("roles").(*schema.Set)
-	privileges := d.Get("privileges").(*schema.Set)
-	grantOption := d.Get("grant").(bool)
-
-	whatToRevoke := fmt.Sprintf("ALL ON %s.%s", database, table)
-	if len(roles.List()) > 0 {
-		whatToRevoke = flattenList(roles.List(), "'%s'")
-	} else if len(privileges.List()) > 0 {
-		privilegeList := flattenList(privileges.List(), "%s")
-		if grantOption {
-			// For privilege grant (SELECT or so), we have to revoke GRANT OPTION
-			// for role grant, ADMIN OPTION is revoked when role is revoked.
-			privilegeList = fmt.Sprintf("%v, GRANT OPTION", privilegeList)
-		}
-		whatToRevoke = fmt.Sprintf("%s ON %s.%s", privilegeList, database, table)
-	}
-
-	sqlStatement := fmt.Sprintf("REVOKE %s FROM %s", whatToRevoke, userOrRole)
+	sqlStatement := grant.SQLRevokeStatement()
 	log.Printf("[DEBUG] SQL: %s", sqlStatement)
 	_, err = db.ExecContext(ctx, sqlStatement)
 	if err != nil {
 		if !isNonExistingGrant(err) {
-			return diag.Errorf("error revoking ALL (%s): %s", sqlStatement, err)
+			return diag.Errorf("error revoking %s: %s", sqlStatement, err)
 		}
 	}
 
@@ -485,73 +600,276 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	table := userHostDatabaseTable[3]
 	grantOption := len(userHostDatabaseTable) == 5
 
+	userOrRole := UserOrRole{
+		Name: user,
+		Host: host,
+	}
+
 	db, err := getDatabaseFromMeta(ctx, meta)
 	if err != nil {
 		return nil, err
 	}
 
-	grant, err := showGrant(ctx, db, fmt.Sprintf("'%s'@'%s'", user, host), database, table, grantOption)
-
+	grants, err := showUserGrants(ctx, db, userOrRole)
 	if err != nil {
 		return nil, err
 	}
+	for _, grant := range grants {
+		// Grant options must match
+		if grant.GrantOption() != grantOption {
+			continue
+		}
 
-	results := []*schema.ResourceData{restoreGrant(user, host, &grant)}
+		// If we have a database grant, we need to match the database name
+		if dbGrant, ok := grant.(MySQLGrantWithDatabase); (!ok && database != "") || (ok && dbGrant.GetDatabase() != database) {
+			continue
+		}
 
+		// If we have a table grant, we need to match the table name
+		if tableGrant, ok := grant.(MySQLGrantWithTable); (!ok && table != "") || (ok && tableGrant.GetTable() != table) {
+			continue
+		}
+
+		// We have a match!
+		res := resourceGrant().Data(nil)
+		setDataFromGrant(grant, res)
+		return []*schema.ResourceData{res}, nil
+	}
+
+	// No match found
+	results := []*schema.ResourceData{}
 	return results, nil
 }
 
-func restoreGrant(user string, host string, grant *MySQLGrant) *schema.ResourceData {
-	d := resourceGrant().Data(nil)
+// setDataFromGrant copies the values from MySQLGrant to the schema.ResourceData
+func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.ResourceData {
 
-	database := grant.Database
-	id := fmt.Sprintf("%s@%s:%s", user, host, formatDatabaseName(database))
-	d.SetId(id)
+	if tableGrant, ok := grant.(*TablePrivilegeGrant); ok {
+		d.Set("database", tableGrant.Database)
+		d.Set("grant", grant.GrantOption())
+		d.Set("tls_option", tableGrant.TLSOption)
 
-	d.Set("user", user)
-	d.Set("host", host)
-	d.Set("database", database)
-	d.Set("table", grant.Table)
-	d.Set("grant", grant.Grant)
-	d.Set("tls_option", "NONE")
-	d.Set("privileges", grant.Privileges)
+	} else if procedureGrant, ok := grant.(*ProcedurePrivilegeGrant); ok {
+		d.Set("database", fmt.Sprintf("%s %s.%s", procedureGrant.ObjectT, procedureGrant.Database, procedureGrant.CallableName))
+		d.Set("table", "*")
+		d.Set("grant", grant.GrantOption())
+		d.Set("tls_option", procedureGrant.TLSOption)
+
+	} else if roleGrant, ok := grant.(*RoleGrant); ok {
+		d.Set("grant", grant.GrantOption())
+		d.Set("roles", roleGrant.Roles)
+		d.Set("tls_option", roleGrant.TLSOption)
+	} else {
+		panic("Unknown grant type")
+	}
+
+	// Only set privileges if there is a delta in the normalized privileges
+	if grantWithPriv, hasPriv := grant.(MySQLGrantWithPrivileges); hasPriv {
+		currentPriv, ok := d.GetOk("privileges")
+		if !ok {
+			d.Set("privileges", grantWithPriv.GetPrivileges())
+		} else {
+			currentPrivs := setToArray(currentPriv.(*schema.Set))
+			currentPrivs = normalizePerms(currentPrivs)
+			if !reflect.DeepEqual(currentPrivs, grantWithPriv.GetPrivileges()) {
+				d.Set("privileges", grantWithPriv.GetPrivileges())
+			}
+		}
+	}
+
+	// This is a bit of a hack, since we don't have a way to distingush between users and roles
+	// from the grant itself. We can only infer it from the schema.
+	userOrRole := grant.GetUserOrRole()
+	if d.Get("role") != "" {
+		d.Set("role", userOrRole.Name)
+	} else {
+		d.Set("user", userOrRole.Name)
+		d.Set("host", userOrRole.Host)
+	}
 
 	return d
 }
 
-func showGrant(ctx context.Context, db *sql.DB, user, database, table string, grantOption bool) (MySQLGrant, error) {
-	allGrants, err := showUserGrants(ctx, db, user)
+func hasConflictingGrants(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) (MySQLGrant, error) {
+	allGrants, err := showUserGrants(ctx, db, desiredGrant.GetUserOrRole())
 	if err != nil {
-		return MySQLGrant{}, fmt.Errorf("showGrant - getting all grants failed: %w", err)
+		return nil, fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
-	grants := MySQLGrant{
-		Database: database,
-		Table:    table,
-		Grant:    grantOption,
-	}
-	for _, grant := range allGrants {
-		// We must normalize database as it may contain something like PROCEDURE `asd` or the same without backticks.
-		// TODO: write tests or consider some other way to handle permissions to PROCEDURE/FUNCTION
-		if grant.Grant == grantOption {
-			if normalizeDatabase(grant.Database) == normalizeDatabase(database) && grant.Table == table {
-				grants.Privileges = append(grants.Privileges, grant.Privileges...)
-			}
-			// Roles don't depend on database / table settings.
-			grants.Roles = append(grants.Roles, grant.Roles...)
+	for _, dbGrant := range allGrants {
+		if desiredGrant.GrantOption() != dbGrant.GrantOption() {
+			continue
 		}
+		if reflect.TypeOf(desiredGrant) != reflect.TypeOf(dbGrant) {
+			continue
+		}
+		if grantWithDatabase, ok := desiredGrant.(MySQLGrantWithDatabase); ok {
+			if grantWithDatabase.GetDatabase() != dbGrant.(MySQLGrantWithDatabase).GetDatabase() {
+				continue
+			}
+		}
+		if grantWithTable, ok := desiredGrant.(MySQLGrantWithTable); ok {
+			if grantWithTable.GetTable() != dbGrant.(MySQLGrantWithTable).GetTable() {
+				continue
+			}
+		}
+		return dbGrant, nil
 	}
-	return grants, nil
+	return nil, nil
 }
 
-func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant, error) {
-	grants := []*MySQLGrant{}
+var (
+	kUserOrRoleRegex = regexp.MustCompile("['`]?([^'`]+)['`]?(?:@['`]?([^'`]+)['`]?)?")
+)
 
-	sqlStatement := fmt.Sprintf("SHOW GRANTS FOR %s", user)
+func parseUserOrRoleFromRow(userOrRoleStr string) (*UserOrRole, error) {
+	userHostMatches := kUserOrRoleRegex.FindStringSubmatch(userOrRoleStr)
+	if len(userHostMatches) == 3 {
+		return &UserOrRole{
+			Name: userHostMatches[1],
+			Host: userHostMatches[2],
+		}, nil
+	} else if len(userHostMatches) == 2 {
+		return &UserOrRole{
+			Name: userHostMatches[1],
+			Host: "%",
+		}, nil
+	} else {
+		return nil, fmt.Errorf("failed to parse user or role portion of grant statement: %s", userOrRoleStr)
+	}
+}
+
+var (
+	kDatabaseAndObjectRegex = regexp.MustCompile("['`]?([^'`]+)['`]?\\.['`]?([^'`]+)['`]?")
+)
+
+func parseDatabaseQualifiedObject(objectRef string) (string, string, error) {
+	if matches := kDatabaseAndObjectRegex.FindStringSubmatch(objectRef); len(matches) == 3 {
+		return matches[1], matches[2], nil
+	}
+	return "", "", fmt.Errorf("failed to parse database and table portion of grant statement: %s", objectRef)
+}
+
+var (
+	kRequireRegex = regexp.MustCompile(`.*REQUIRE\s+(.*)`)
+
+	kGrantRegex = regexp.MustCompile(`\bGRANT OPTION\b|\bADMIN OPTION\b`)
+
+	procedureGrantRegex = regexp.MustCompile(`GRANT\s+(.+)\s+ON\s+(FUNCTION|PROCEDURE)\s+(.+)\s+TO\s+(.+)`)
+	tableGrantRegex     = regexp.MustCompile(`GRANT\s+(.+)\s+ON\s+(.+)\s+TO\s+(.+)`)
+	roleGrantRegex      = regexp.MustCompile(`GRANT\s+(.+)\s+TO\s+(.+)`)
+)
+
+func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
+
+	// Ignore REVOKE.*
+	if strings.HasPrefix(grantStr, "REVOKE") {
+		log.Printf("[WARN] Partial revokes are not fully supported and lead to unexpected behavior. Consult documentation https://dev.mysql.com/doc/refman/8.0/en/partial-revokes.html on how to disable them for safe and reliable terraform. Relevant partial revoke: %s\n", grantStr)
+		return nil, nil
+	}
+
+	// Parse Require Statement
+	tlsOption := ""
+	if requireMatches := kRequireRegex.FindStringSubmatch(grantStr); len(requireMatches) == 2 {
+		tlsOption = requireMatches[1]
+	}
+
+	if procedureMatches := procedureGrantRegex.FindStringSubmatch(grantStr); len(procedureMatches) == 5 {
+		privsStr := procedureMatches[1]
+		privileges := extractPermTypes(privsStr)
+		privileges = normalizePerms(privileges)
+
+		// After normalizePerms, we may have empty privileges. If so, skip this grant.
+		if len(privileges) == 0 {
+			return nil, nil
+		}
+
+		userOrRole, err := parseUserOrRoleFromRow(procedureMatches[4])
+		if err != nil {
+			return nil, err
+		}
+
+		database, callable, err := parseDatabaseQualifiedObject(procedureMatches[3])
+		if err != nil {
+			return nil, err
+		}
+
+		grant := &ProcedurePrivilegeGrant{
+			Database:     database,
+			ObjectT:      ObjectT(procedureMatches[2]),
+			CallableName: callable,
+			Privileges:   privileges,
+			Grant:        kGrantRegex.MatchString(grantStr),
+			UserOrRole:   *userOrRole,
+			TLSOption:    tlsOption,
+		}
+		log.Printf("[DEBUG] Got: %s, parsed grant is %s: %v", grantStr, reflect.TypeOf(grant), grant)
+		return grant, nil
+	} else if tableMatches := tableGrantRegex.FindStringSubmatch(grantStr); len(tableMatches) == 4 {
+		privsStr := tableMatches[1]
+		privileges := extractPermTypes(privsStr)
+		privileges = normalizePerms(privileges)
+
+		// After normalizePerms, we may have empty privileges. If so, skip this grant.
+		if len(privileges) == 0 {
+			return nil, nil
+		}
+
+		userOrRole, err := parseUserOrRoleFromRow(tableMatches[3])
+		if err != nil {
+			return nil, err
+		}
+
+		database, table, err := parseDatabaseQualifiedObject(tableMatches[2])
+		if err != nil {
+			return nil, err
+		}
+
+		grant := &TablePrivilegeGrant{
+			Database:   database,
+			Table:      table,
+			Privileges: privileges,
+			Grant:      kGrantRegex.MatchString(grantStr),
+			UserOrRole: *userOrRole,
+			TLSOption:  tlsOption,
+		}
+		log.Printf("[DEBUG] Got: %s, parsed grant is %s: %v", grantStr, reflect.TypeOf(grant), grant)
+		return grant, nil
+	} else if roleMatches := roleGrantRegex.FindStringSubmatch(grantStr); len(roleMatches) == 3 {
+		rolesStart := strings.Split(roleMatches[1], ",")
+		roles := make([]string, len(rolesStart))
+
+		for i, role := range rolesStart {
+			roles[i] = strings.Trim(role, "`@%\" ")
+		}
+
+		userOrRole, err := parseUserOrRoleFromRow(roleMatches[2])
+		if err != nil {
+			return nil, err
+		}
+
+		grant := &RoleGrant{
+			Roles:      roles,
+			Grant:      kGrantRegex.MatchString(grantStr),
+			UserOrRole: *userOrRole,
+			TLSOption:  tlsOption,
+		}
+		log.Printf("[DEBUG] Got: %s, parsed grant is %s: %v", grantStr, reflect.TypeOf(grant), grant)
+		return grant, nil
+
+	} else {
+		return nil, fmt.Errorf("failed to parse object portion of grant statement: %s", grantStr)
+	}
+}
+
+func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {
+	grants := []MySQLGrant{}
+
+	sqlStatement := fmt.Sprintf("SHOW GRANTS FOR %s", userOrRole.SQLString())
 	log.Printf("[DEBUG] SQL: %s", sqlStatement)
 	rows, err := db.QueryContext(ctx, sqlStatement)
 
 	if isNonExistingGrant(err) {
-		return []*MySQLGrant{}, nil
+		return []MySQLGrant{}, nil
 	}
 
 	if err != nil {
@@ -559,12 +877,6 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 	}
 
 	defer rows.Close()
-	re := regexp.MustCompile(`^GRANT (.+) ON (.+?)\.(.+?) TO ([^ ]+)`)
-
-	// Ex: GRANT `app_read`@`%`,`app_write`@`%` TO `rw_user1`@`localhost
-	reRole := regexp.MustCompile(`^GRANT (.+) TO`)
-	reGrant := regexp.MustCompile(`\bGRANT OPTION\b|\bADMIN OPTION\b`)
-
 	for rows.Next() {
 		var rawGrant string
 
@@ -573,80 +885,26 @@ func showUserGrants(ctx context.Context, db *sql.DB, user string) ([]*MySQLGrant
 			return nil, fmt.Errorf("showUserGrants - reading row failed: %w", err)
 		}
 
-		if strings.HasPrefix(rawGrant, "REVOKE") {
-			log.Printf("[WARN] Partial revokes are not fully supported and lead to unexpected behavior. Consult documentation https://dev.mysql.com/doc/refman/8.0/en/partial-revokes.html on how to disable them for safe and reliable terraform. Relevant partial revoke: %s\n", rawGrant)
+		parsedGrant, err := parseGrantFromRow(rawGrant)
+		if err != nil {
+			return nil, err
+		}
+		if parsedGrant == nil {
 			continue
 		}
 
-		if m := re.FindStringSubmatch(rawGrant); len(m) == 5 {
-			privsStr := m[1]
-			privList := extractPermTypes(privsStr)
-			privileges := make([]string, len(privList))
-
-			for i, priv := range privList {
-				privileges[i] = strings.TrimSpace(priv)
-			}
-			grantUserHost := m[4]
-			if normalizeUserHost(grantUserHost) != normalizeUserHost(user) {
-				// Percona returns also grants for % if we requested IP.
-				// Skip them as we don't want terraform to consider it.
-				log.Printf("[DEBUG] Skipping grant with host %v while we want %v", grantUserHost, user)
-				continue
-			}
-
-			grant := &MySQLGrant{
-				Database:   strings.Trim(m[2], "`\""),
-				Table:      strings.Trim(m[3], "`\""),
-				Privileges: privileges,
-				Grant:      reGrant.MatchString(rawGrant),
-			}
-
-			if len(privileges) > 0 {
-				grants = append(grants, grant)
-			}
-
-		} else if m := reRole.FindStringSubmatch(rawGrant); len(m) == 2 {
-			roleStr := m[1]
-			rolesStart := strings.Split(roleStr, ",")
-			roles := make([]string, len(rolesStart))
-
-			for i, role := range rolesStart {
-				roles[i] = strings.Trim(role, "`@%\" ")
-			}
-
-			grant := &MySQLGrant{
-				Roles: roles,
-				Grant: reGrant.MatchString(rawGrant),
-			}
-
-			grants = append(grants, grant)
-		} else {
-			return nil, fmt.Errorf("failed to parse grant statement: %s", rawGrant)
+		// Filter out any grants that don't match the provided user
+		// Percona returns also grants for % if we requested IP.
+		// Skip them as we don't want terraform to consider it.
+		if !parsedGrant.GetUserOrRole().Equals(userOrRole) {
+			log.Printf("[DEBUG] Skipping grant for %s as it doesn't match %s", parsedGrant.GetUserOrRole().SQLString(), userOrRole.SQLString())
+			continue
 		}
-	}
+		grants = append(grants, parsedGrant)
 
-	log.Printf("[DEBUG] Parsed grants are: %v", grants)
+	}
+	log.Printf("[DEBUG] Parsed grants are: %s", grants)
 	return grants, nil
-}
-
-func normalizeUserHost(userHost string) string {
-	if !strings.Contains(userHost, "@") {
-		userHost = fmt.Sprint(userHost, "@%")
-	}
-	withoutQuotes := strings.ReplaceAll(userHost, "'", "")
-	withoutBackticks := strings.ReplaceAll(withoutQuotes, "`", "")
-	withoutDblQuotes := strings.ReplaceAll(withoutBackticks, "\"", "")
-	return withoutDblQuotes
-}
-
-func normalizeDatabase(database string) string {
-	reProcedure := regexp.MustCompile("(?i)^(function|procedure) `(.*)$")
-	if reProcedure.MatchString(database) {
-		// This is only a hack - user can specify function / procedure as database.
-		database = reProcedure.ReplaceAllString(database, "$1 ${2}")
-	}
-
-	return database
 }
 
 func removeUselessPerms(grants []string) []string {
@@ -690,14 +948,15 @@ func extractPermTypes(g string) []string {
 		}
 	}
 	grants = append(grants, string(currentWord))
-	return removeUselessPerms(grants)
+	return grants
 }
 
 func normalizeColumnOrder(perm string) string {
-	re := regexp.MustCompile("^([^(]*)\\((.*)\\)$")
+	re := regexp.MustCompile(`^([^(]*)\((.*)\)$`)
 	// We may get inputs like
 	// 	SELECT(b,a,c)   -> SELECT(a,b,c)
 	// 	DELETE          -> DELETE
+	//  SELECT (a,b,c)  -> SELECT(a,b,c)
 	// if it's without parentheses, return it right away.
 	// Else split what is inside, sort it, concat together and return the result.
 	m := re.FindStringSubmatch(perm)
@@ -710,16 +969,17 @@ func normalizeColumnOrder(perm string) string {
 		parts[i] = strings.Trim(parts[i], "` ")
 	}
 	sort.Strings(parts)
+	precursor := strings.Trim(m[1], " ")
 	partsTogether := strings.Join(parts, ", ")
-	return fmt.Sprintf("%s(%s)", m[1], partsTogether)
+	return fmt.Sprintf("%s(%s)", precursor, partsTogether)
 }
 
 func normalizePerms(perms []string) []string {
-	// Spaces and backticks are optional, let's ignore them.
-	re := regexp.MustCompile("[ `]")
 	ret := []string{}
 	for _, perm := range perms {
-		permNorm := re.ReplaceAllString(perm, "")
+		// Remove leading and trailing backticks and spaces
+		permNorm := strings.Trim(perm, "` ")
+
 		permUcase := strings.ToUpper(permNorm)
 		if permUcase == "ALL" || permUcase == "ALLPRIVILEGES" {
 			permUcase = "ALL PRIVILEGES"
@@ -728,44 +988,11 @@ func normalizePerms(perms []string) []string {
 
 		ret = append(ret, permSortedColumns)
 	}
+
+	// Remove useless perms
+	ret = removeUselessPerms(ret)
+
 	return ret
-}
-
-func makePrivs(have, want []string) []string {
-	// This is tricky to prevent diffs that cannot be suppressed easily.
-	// Example:
-	// Have select(`c1`, `c2`), insert (c3,c2)
-	// Want select(c2,c1), insert(c3,c2)
-	// So we want to normalize both and then go from "want" to "have" to
-	// We'll have map want->wantnorm = havenorm->have
-
-	// Also, we need to return all mapped values of "want".
-
-	// After normalize, same indices have the same values, prepare maps.
-	haveNorm := normalizePerms(have)
-	haveNormToHave := map[string]string{}
-	for i := range haveNorm {
-		haveNormToHave[haveNorm[i]] = have[i]
-	}
-
-	wantNorm := normalizePerms(want)
-	wantNormToWant := map[string]string{}
-	for i := range wantNorm {
-		wantNormToWant[want[i]] = wantNorm[i]
-	}
-
-	retSet := []string{}
-	for _, w := range want {
-		suspect := haveNormToHave[wantNormToWant[w]]
-		if suspect == "" {
-			// Nothing found in what we have.
-			retSet = append(retSet, w)
-		} else {
-			retSet = append(retSet, suspect)
-		}
-	}
-
-	return retSet
 }
 
 func setToArray(s interface{}) []string {
