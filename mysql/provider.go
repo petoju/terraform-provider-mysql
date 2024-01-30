@@ -184,10 +184,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		endpoint = strings.ReplaceAll(endpoint, "cloudsql://", "")
 		var err error
 		if iam_auth { // Access token will be in the password field
-			token_opetion := cloudsqlconn.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{
+			token := oauth2.StaticTokenSource(&oauth2.Token{
 				AccessToken: password,
-			}))
-			_, err = cloudsql.RegisterDriver("cloudsql", token_opetion, cloudsqlconn.WithIAMAuthN())
+			})
+			_, err = cloudsql.RegisterDriver("cloudsql", cloudsqlconn.WithIAMAuthNTokenSources(token, token))
 		} else {
 			_, err = cloudsql.RegisterDriver("cloudsql")
 		}
