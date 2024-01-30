@@ -23,6 +23,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
 	"golang.org/x/net/proxy"
+	"golang.org/x/oauth2"
 
 	cloudsqlconn "cloud.google.com/go/cloudsqlconn"
 	cloudsql "cloud.google.com/go/cloudsqlconn/mysql/mysql"
@@ -182,8 +183,11 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		proto = "cloudsql"
 		endpoint = strings.ReplaceAll(endpoint, "cloudsql://", "")
 		var err error
-		if iam_auth {
-			_, err = cloudsql.RegisterDriver("cloudsql", cloudsqlconn.WithIAMAuthN())
+		if iam_auth { // Access token will be in the password field
+			token_opetion := cloudsqlconn.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{
+				AccessToken: password,
+			}))
+			_, err = cloudsql.RegisterDriver("cloudsql", token_opetion, cloudsqlconn.WithIAMAuthN())
 		} else {
 			_, err = cloudsql.RegisterDriver("cloudsql")
 		}
