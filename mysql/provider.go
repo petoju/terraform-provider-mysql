@@ -2,9 +2,12 @@ package mysql
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/url"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
+	"github.com/samber/lo"
 	"google.golang.org/api/googleapi"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -111,6 +115,21 @@ func Provider() *schema.Provider {
 				}, false),
 			},
 
+			"ca_cert": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+
+			"client_cert": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+
+			"client_key": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+
 			"max_conn_lifetime_sec": {
 				Type:     schema.TypeInt,
 				Optional: true,
@@ -175,6 +194,41 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var allowNativePasswords = authPlugin == nativePasswords
 	var password = d.Get("password").(string)
 	var iam_auth = d.Get("iam_database_authentication").(bool)
+	var caCertPath = d.Get("ca_cert").(string)
+	var clientCertPath = d.Get("client_cert").(string)
+	var clientKeyPath = d.Get("client_key").(string)
+	var tlsConfig *tls.Config
+
+	certSettings := lo.Filter([]string{caCertPath, clientCertPath, clientKeyPath}, func(x string, index int) bool {
+		return x != ""
+	})
+	if len(certSettings) > 0 {
+		if len(certSettings) == 3 {
+			rootCertPool := x509.NewCertPool()
+			pem, err := ioutil.ReadFile(caCertPath)
+			if err != nil {
+				return nil, diag.Errorf("failed to read CA cert: %v", err)
+			}
+
+			if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+				return nil, diag.Errorf("failed to append pem: %v", pem)
+			}
+
+			clientCert := make([]tls.Certificate, 0, 1)
+			certs, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
+			if err != nil {
+				return nil, diag.Errorf("error lading keypair: %v", err)
+			}
+			clientCert = append(clientCert, certs)
+			tlsConfig = &tls.Config{
+				RootCAs:      rootCertPool,
+				Certificates: clientCert,
+			}
+			mysql.RegisterTLSConfig("custom", tlsConfig)
+		} else {
+			return nil, diag.Errorf("to configure TLS all of ca_cert, client_cert and client_key must be set")
+		}
+	}
 
 	proto := "tcp"
 	if len(endpoint) > 0 && endpoint[0] == '/' {
@@ -241,6 +295,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		AllowCleartextPasswords: allowClearTextPasswords,
 		InterpolateParams:       true,
 		Params:                  connParams,
+	}
+
+	if tlsConfig != nil {
+		conf.TLS = tlsConfig
 	}
 
 	dialer, err := makeDialer(d)
@@ -359,6 +417,7 @@ func connectToMySQLInternal(ctx context.Context, conf *MySQLConfiguration) (*One
 	defer connectionCacheMtx.Unlock()
 
 	dsn := conf.Config.FormatDSN()
+	log.Printf("[DEBUG] Using dsn: %s", dsn)
 	if connectionCache[dsn] != nil {
 		return connectionCache[dsn], nil
 	}
