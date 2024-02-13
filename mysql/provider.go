@@ -115,6 +115,11 @@ func Provider() *schema.Provider {
 				}, false),
 			},
 
+			"tls_config_key": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+
 			"ca_cert": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -194,15 +199,17 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var allowNativePasswords = authPlugin == nativePasswords
 	var password = d.Get("password").(string)
 	var iam_auth = d.Get("iam_database_authentication").(bool)
+	var tlsConfig = d.Get("tls").(string)
+	var tlsConfigKey = d.Get("tls_config_key").(string)
 	var caCertPath = d.Get("ca_cert").(string)
 	var clientCertPath = d.Get("client_cert").(string)
 	var clientKeyPath = d.Get("client_key").(string)
-	var tlsConfig *tls.Config
+	var tlsConfigStruct *tls.Config
 
 	certSettings := lo.Filter([]string{caCertPath, clientCertPath, clientKeyPath}, func(x string, index int) bool {
 		return x != ""
 	})
-	if len(certSettings) > 0 {
+	if len(certSettings) > 0 && len(tlsConfigKey) > 0 {
 		if len(certSettings) == 3 {
 			rootCertPool := x509.NewCertPool()
 			pem, err := ioutil.ReadFile(caCertPath)
@@ -220,11 +227,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 				return nil, diag.Errorf("error lading keypair: %v", err)
 			}
 			clientCert = append(clientCert, certs)
-			tlsConfig = &tls.Config{
+			tlsConfigStruct = &tls.Config{
 				RootCAs:      rootCertPool,
 				Certificates: clientCert,
 			}
-			mysql.RegisterTLSConfig("custom", tlsConfig)
+			mysql.RegisterTLSConfig(tlsConfigKey, tlsConfigStruct)
+			tlsConfig = tlsConfigKey
 		} else {
 			return nil, diag.Errorf("to configure TLS all of ca_cert, client_cert and client_key must be set")
 		}
@@ -290,15 +298,15 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		Passwd:                  password,
 		Net:                     proto,
 		Addr:                    endpoint,
-		TLSConfig:               d.Get("tls").(string),
+		TLSConfig:               tlsConfig,
 		AllowNativePasswords:    allowNativePasswords,
 		AllowCleartextPasswords: allowClearTextPasswords,
 		InterpolateParams:       true,
 		Params:                  connParams,
 	}
 
-	if tlsConfig != nil {
-		conf.TLS = tlsConfig
+	if tlsConfigStruct != nil {
+		conf.TLS = tlsConfigStruct
 	}
 
 	dialer, err := makeDialer(d)

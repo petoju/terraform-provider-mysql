@@ -274,10 +274,6 @@ func (cfg *Config) FormatDSN() string {
 		writeDSNParam(&buf, &hasParam, "tls", url.QueryEscape(cfg.TLSConfig))
 	}
 
-	if cfg.TLS != nil {
-		writeDSNParam(&buf, &hasParam, "tls", "custom")
-	}
-
 	if cfg.WriteTimeout > 0 {
 		writeDSNParam(&buf, &hasParam, "writeTimeout", cfg.WriteTimeout.String())
 	}
