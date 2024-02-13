@@ -123,9 +123,30 @@ func Provider() *schema.Provider {
 			},
 
 			"custom_tls": {
-				Type:     schema.TypeMap,
+				Type:     schema.TypeList,
 				Optional: true,
 				Default:  nil,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"config_key": {
+							Type:     schema.TypeString,
+							Default:  "custom",
+							Optional: true,
+						},
+						"ca_cert": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"client_cert": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"client_key": {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+					},
+				},
 			},
 
 			"max_conn_lifetime_sec": {
@@ -193,13 +214,13 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var password = d.Get("password").(string)
 	var iam_auth = d.Get("iam_database_authentication").(bool)
 	var tlsConfig = d.Get("tls").(string)
-	var customTLSMap = make(map[string]interface{})
 	var tlsConfigStruct *tls.Config
 	var customTLS CustomTLS
 
-	customTLSMap = d.Get("custom_tls").(map[string]interface{})
+	customTLSMap := d.Get("custom_tls").([]interface{})
 	if len(customTLSMap) > 0 {
-		customTLSJson, err := json.Marshal(customTLSMap)
+		customMap := customTLSMap[0].(map[string]interface{})
+		customTLSJson, err := json.Marshal(customMap)
 		if err != nil {
 			return nil, diag.Errorf("failed to marshal tls config: %v", customTLSMap)
 		}
