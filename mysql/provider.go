@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -18,7 +19,6 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
-	"github.com/samber/lo"
 	"google.golang.org/api/googleapi"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -51,6 +51,13 @@ type MySQLConfiguration struct {
 	MaxConnLifetime        time.Duration
 	MaxOpenConns           int
 	ConnectRetryTimeoutSec time.Duration
+}
+
+type CustomTLS struct {
+	ConfigKey  string `json:"config_key"`
+	CACert     string `json:"ca_cert"`
+	ClientCert string `json:"client_cert"`
+	ClientKey  string `json:"client_key"`
 }
 
 var (
@@ -115,24 +122,10 @@ func Provider() *schema.Provider {
 				}, false),
 			},
 
-			"tls_config_key": {
-				Type:     schema.TypeString,
+			"custom_tls": {
+				Type:     schema.TypeMap,
 				Optional: true,
-			},
-
-			"ca_cert": {
-				Type:     schema.TypeString,
-				Optional: true,
-			},
-
-			"client_cert": {
-				Type:     schema.TypeString,
-				Optional: true,
-			},
-
-			"client_key": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Default:  nil,
 			},
 
 			"max_conn_lifetime_sec": {
@@ -200,42 +193,44 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var password = d.Get("password").(string)
 	var iam_auth = d.Get("iam_database_authentication").(bool)
 	var tlsConfig = d.Get("tls").(string)
-	var tlsConfigKey = d.Get("tls_config_key").(string)
-	var caCertPath = d.Get("ca_cert").(string)
-	var clientCertPath = d.Get("client_cert").(string)
-	var clientKeyPath = d.Get("client_key").(string)
+	var customTLSMap = make(map[string]interface{})
 	var tlsConfigStruct *tls.Config
+	var customTLS CustomTLS
 
-	certSettings := lo.Filter([]string{caCertPath, clientCertPath, clientKeyPath}, func(x string, index int) bool {
-		return x != ""
-	})
-	if len(certSettings) > 0 && len(tlsConfigKey) > 0 {
-		if len(certSettings) == 3 {
-			rootCertPool := x509.NewCertPool()
-			pem, err := ioutil.ReadFile(caCertPath)
-			if err != nil {
-				return nil, diag.Errorf("failed to read CA cert: %v", err)
-			}
-
-			if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
-				return nil, diag.Errorf("failed to append pem: %v", pem)
-			}
-
-			clientCert := make([]tls.Certificate, 0, 1)
-			certs, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
-			if err != nil {
-				return nil, diag.Errorf("error lading keypair: %v", err)
-			}
-			clientCert = append(clientCert, certs)
-			tlsConfigStruct = &tls.Config{
-				RootCAs:      rootCertPool,
-				Certificates: clientCert,
-			}
-			mysql.RegisterTLSConfig(tlsConfigKey, tlsConfigStruct)
-			tlsConfig = tlsConfigKey
-		} else {
-			return nil, diag.Errorf("to configure TLS all of ca_cert, client_cert and client_key must be set")
+	customTLSMap = d.Get("custom_tls").(map[string]interface{})
+	if len(customTLSMap) > 0 {
+		customTLSJson, err := json.Marshal(customTLSMap)
+		if err != nil {
+			return nil, diag.Errorf("failed to marshal tls config: %v", customTLSMap)
 		}
+
+		err = json.Unmarshal(customTLSJson, &customTLS)
+		if err != nil {
+			return nil, diag.Errorf("failed to unmarshal tls config: %v", customTLSJson)
+		}
+
+		rootCertPool := x509.NewCertPool()
+		pem, err := ioutil.ReadFile(customTLS.CACert)
+		if err != nil {
+			return nil, diag.Errorf("failed to read CA cert: %v", err)
+		}
+
+		if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+			return nil, diag.Errorf("failed to append pem: %v", pem)
+		}
+
+		clientCert := make([]tls.Certificate, 0, 1)
+		certs, err := tls.LoadX509KeyPair(customTLS.ClientCert, customTLS.ClientKey)
+		if err != nil {
+			return nil, diag.Errorf("error lading keypair: %v", err)
+		}
+		clientCert = append(clientCert, certs)
+		tlsConfigStruct = &tls.Config{
+			RootCAs:      rootCertPool,
+			Certificates: clientCert,
+		}
+		mysql.RegisterTLSConfig(customTLS.ConfigKey, tlsConfigStruct)
+		tlsConfig = customTLS.ConfigKey
 	}
 
 	proto := "tcp"
