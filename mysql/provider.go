@@ -215,10 +215,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var iam_auth = d.Get("iam_database_authentication").(bool)
 	var tlsConfig = d.Get("tls").(string)
 	var tlsConfigStruct *tls.Config
-	var customTLS CustomTLS
 
 	customTLSMap := d.Get("custom_tls").([]interface{})
 	if len(customTLSMap) > 0 {
+		var customTLS CustomTLS
 		customMap := customTLSMap[0].(map[string]interface{})
 		customTLSJson, err := json.Marshal(customMap)
 		if err != nil {
