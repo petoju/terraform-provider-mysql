@@ -65,6 +65,7 @@ resource "mysql_database" "app" {
 ```
 
 Using encrypted connections can be done by using the `custom_tls` field in the provider
+
 ```hcl
 provider "mysql" {
   endpoint = "my-database.example.com:3306"
@@ -76,7 +77,6 @@ provider "mysql" {
     client_key  = "/path/to/certs/client_key.pem"
   }
 }
-
 ```
 
 ### GCP CloudSQL Connection
