@@ -243,7 +243,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		clientCert := make([]tls.Certificate, 0, 1)
 		certs, err := tls.LoadX509KeyPair(customTLS.ClientCert, customTLS.ClientKey)
 		if err != nil {
-			return nil, diag.Errorf("error lading keypair: %v", err)
+			return nil, diag.Errorf("error loading keypair: %v", err)
 		}
 		clientCert = append(clientCert, certs)
 		tlsConfigStruct = &tls.Config{
