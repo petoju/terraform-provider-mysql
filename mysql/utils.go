@@ -5,9 +5,45 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
-	"github.com/hashicorp/go-version"
 	"log"
+	"sync"
+
+	"github.com/hashicorp/go-version"
 )
+
+type KeyedMutex struct {
+	mu    sync.Mutex // Protects access to the internal map
+	locks map[string]*sync.Mutex
+}
+
+func NewKeyedMutex() *KeyedMutex {
+	return &KeyedMutex{
+		locks: make(map[string]*sync.Mutex),
+	}
+}
+
+func (km *KeyedMutex) Lock(key string) {
+	km.mu.Lock()
+	lock, exists := km.locks[key]
+	if !exists {
+		lock = &sync.Mutex{}
+		km.locks[key] = lock
+	}
+	km.mu.Unlock()
+
+	lock.Lock()
+}
+
+func (km *KeyedMutex) Unlock(key string) {
+	km.mu.Lock()
+	lock, exists := km.locks[key]
+	if !exists {
+		panic("unlock of unlocked mutex")
+	}
+	km.mu.Unlock()
+
+	lock.Unlock()
+}
 
 func hashSum(contents interface{}) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(contents.(string))))

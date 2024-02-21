@@ -3,14 +3,15 @@ package mysql
 import (
 	"context"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"log"
 	"math/rand"
 	"regexp"
 	"strings"
 	"testing"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccGrant(t *testing.T) {
@@ -199,7 +200,7 @@ func TestAccGrantComplex(t *testing.T) {
 				// Create table first
 				Config: testAccGrantConfigNoGrant(dbName),
 				Check: resource.ComposeTestCheckFunc(
-					prepareTable(dbName),
+					prepareTable(dbName, "tbl"),
 				),
 			},
 			{
@@ -289,7 +290,7 @@ func TestAccGrantComplexMySQL8(t *testing.T) {
 				// Create table first
 				Config: testAccGrantConfigNoGrant(dbName),
 				Check: resource.ComposeTestCheckFunc(
-					prepareTable(dbName),
+					prepareTable(dbName, "tbl"),
 				),
 			},
 			{
@@ -381,14 +382,14 @@ func TestAccGrant_complexRoleGrants(t *testing.T) {
 	})
 }
 
-func prepareTable(dbname string) resource.TestCheckFunc {
+func prepareTable(dbname string, tableName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
 		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
 		if err != nil {
 			return err
 		}
-		if _, err := db.Exec(fmt.Sprintf("CREATE TABLE `%s`.`tbl`(c1 INT, c2 INT, c3 INT,c4 INT,c5 INT);", dbname)); err != nil {
+		if _, err := db.Exec(fmt.Sprintf("CREATE TABLE `%s`.`%s`(c1 INT, c2 INT, c3 INT,c4 INT,c5 INT);", dbname, tableName)); err != nil {
 			return fmt.Errorf("error reading grant: %s", err)
 		}
 		return nil
@@ -878,7 +879,7 @@ func TestAccGrantOnProcedure(t *testing.T) {
 				// Create table first
 				Config: testAccGrantConfigNoGrant(dbName),
 				Check: resource.ComposeTestCheckFunc(
-					prepareTable(dbName),
+					prepareTable(dbName, "tbl"),
 				),
 			},
 			{
@@ -1037,4 +1038,118 @@ func revokeUserPrivs(dbname string, privs string) resource.TestCheckFunc {
 		}
 		return nil
 	}
+}
+
+func TestAllowDuplicateUsersDifferentTables(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+
+	duplicateUserConfig := fmt.Sprintf(`
+	resource "mysql_database" "test" {
+	  name = "%s"
+	}
+	
+	resource "mysql_user" "test" {
+	  user     = "jdoe-%s"
+	  host     = "example.com"
+	}
+	
+	resource "mysql_grant" "grant1" {
+	  user       = "${mysql_user.test.user}"
+	  host       = "${mysql_user.test.host}"
+	  database   = "${mysql_database.test.name}"
+      table      = "table1"
+	  privileges = ["UPDATE", "SELECT"]
+	}
+	
+	resource "mysql_grant" "grant2" {
+	  user       = "${mysql_user.test.user}"
+	  host       = "${mysql_user.test.host}"
+	  database   = "${mysql_database.test.name}"
+	  table      = "table2"
+	  privileges = ["UPDATE", "SELECT"]
+	}
+	`, dbName, dbName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				// Create table first
+				Config: testAccGrantConfigNoGrant(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					prepareTable(dbName, "table1"),
+					prepareTable(dbName, "table2"),
+				),
+			},
+			{
+				Config: duplicateUserConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant1", "SELECT", true, false),
+					resource.TestCheckResourceAttr("mysql_grant.grant1", "table", "table1"),
+					testAccPrivilege("mysql_grant.grant2", "SELECT", true, false),
+					resource.TestCheckResourceAttr("mysql_grant.grant2", "table", "table2"),
+				),
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant1", "SELECT", true, false),
+					resource.TestCheckResourceAttr("mysql_grant.grant1", "table", "table1"),
+					testAccPrivilege("mysql_grant.grant2", "SELECT", true, false),
+					resource.TestCheckResourceAttr("mysql_grant.grant2", "table", "table2"),
+				),
+			},
+		},
+	})
+}
+
+func TestDisallowDuplicateUsersSameTable(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+
+	duplicateUserConfig := fmt.Sprintf(`
+	resource "mysql_database" "test" {
+	  name = "%s"
+	}
+	
+	resource "mysql_user" "test" {
+	  user     = "jdoe-%s"
+	  host     = "example.com"
+	}
+	
+	resource "mysql_grant" "grant1" {
+	  user       = "${mysql_user.test.user}"
+	  host       = "${mysql_user.test.host}"
+	  database   = "${mysql_database.test.name}"
+      table      = "table1"
+	  privileges = ["UPDATE", "SELECT"]
+	}
+	
+	resource "mysql_grant" "grant2" {
+	  user       = "${mysql_user.test.user}"
+	  host       = "${mysql_user.test.host}"
+	  database   = "${mysql_database.test.name}"
+	  table      = "table1"
+	  privileges = ["UPDATE", "SELECT"]
+	}
+	`, dbName, dbName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGrantConfigNoGrant(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					prepareTable(dbName, "table1"),
+				),
+			},
+			{
+				Config:      duplicateUserConfig,
+				ExpectError: regexp.MustCompile("already has"),
+			},
+		},
+	})
 }

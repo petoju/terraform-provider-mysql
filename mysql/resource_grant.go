@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/hashicorp/go-version"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -24,6 +25,8 @@ var (
 	kFunction  ObjectT = "FUNCTION"
 	kTable     ObjectT = "TABLE"
 )
+
+var grantCreateMutex = NewKeyedMutex()
 
 type MySQLGrant interface {
 	GetId() string
@@ -127,7 +130,7 @@ type TablePrivilegeGrant struct {
 }
 
 func (t *TablePrivilegeGrant) GetId() string {
-	return fmt.Sprintf("%s:%s", t.UserOrRole.IDString(), t.GetDatabase())
+	return fmt.Sprintf("%s:%s:%s", t.UserOrRole.IDString(), t.GetDatabase(), t.GetTable())
 }
 
 func (t *TablePrivilegeGrant) GetUserOrRole() UserOrRole {
@@ -200,7 +203,7 @@ type ProcedurePrivilegeGrant struct {
 }
 
 func (t *ProcedurePrivilegeGrant) GetId() string {
-	return fmt.Sprintf("%s:%s", t.UserOrRole.IDString(), t.GetDatabase())
+	return fmt.Sprintf("%s:%s:%s", t.UserOrRole.IDString(), t.GetDatabase(), t.GetCallableName())
 }
 
 func (t *ProcedurePrivilegeGrant) GetUserOrRole() UserOrRole {
@@ -493,13 +496,18 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return diag.Errorf("role grants are not supported by this version of MySQL")
 	}
 
+	// Acquire a lock for the user
+	// This is necessary so that the conflicting grant check is correct with respect to other grants being created
+	grantCreateMutex.Lock(grant.GetUserOrRole().IDString())
+	defer grantCreateMutex.Unlock(grant.GetUserOrRole().IDString())
+
 	// Check to see if there are existing roles that might be clobbered by this grant
 	conflictingGrant, err := getMatchingGrant(ctx, db, grant)
 	if err != nil {
 		return diag.Errorf("failed showing grants: %v", err)
 	}
 	if conflictingGrant != nil {
-		return diag.Errorf("user/role %s already has unmanaged grant %v - import it first", grant.GetUserOrRole(), conflictingGrant)
+		return diag.Errorf("user/role %s already has grant %v - ", grant.GetUserOrRole(), conflictingGrant)
 	}
 
 	stmtSQL := grant.SQLGrantStatement()
@@ -612,10 +620,15 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return diag.FromErr(err)
 	}
 
+	// Parse the grant from ResourceData
 	grant, diagErr := parseResourceFromData(d)
 	if err != nil {
 		return diagErr
 	}
+
+	// Acquire a lock for the user
+	grantCreateMutex.Lock(grant.GetUserOrRole().IDString())
+	defer grantCreateMutex.Unlock(grant.GetUserOrRole().IDString())
 
 	sqlStatement := grant.SQLRevokeStatement()
 	log.Printf("[DEBUG] SQL: %s", sqlStatement)
