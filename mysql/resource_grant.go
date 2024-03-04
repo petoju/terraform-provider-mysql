@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/hashicorp/go-version"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/hashicorp/go-version"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -393,7 +394,6 @@ var kReProcedureWithoutDatabase = regexp.MustCompile(`(?i)^(function|procedure) 
 var kReProcedureWithDatabase = regexp.MustCompile(`(?i)^(function|procedure) ([^.]*)\.([^.]*)$`)
 
 func parseResourceFromData(d *schema.ResourceData) (MySQLGrant, diag.Diagnostics) {
-
 	// Step 1: Parse the user/role
 	var userOrRole UserOrRole
 	userAttr, userOk := d.GetOk("user")
@@ -652,18 +652,26 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	user := userHostDatabaseTable[0]
 	host := userHostDatabaseTable[1]
 	database := userHostDatabaseTable[2]
-	table := userHostDatabaseTable[3]
+	tableOrCallable := userHostDatabaseTable[3]
 	grantOption := len(userHostDatabaseTable) == 5
 	userOrRole := UserOrRole{
 		Name: user,
 		Host: host,
 	}
 
-	desiredGrant := &TablePrivilegeGrant{
+	desiredTableGrant := &TablePrivilegeGrant{
 		Database:   database,
-		Table:      table,
+		Table:      tableOrCallable,
 		Grant:      grantOption,
 		UserOrRole: userOrRole,
+	}
+
+	desiredProcedureGrant := &ProcedurePrivilegeGrant{
+		Database:     database,
+		CallableName: tableOrCallable,
+		Grant:        grantOption,
+		UserOrRole:   userOrRole,
+		ObjectT:      kProcedure,
 	}
 
 	db, err := getDatabaseFromMeta(ctx, meta)
@@ -676,7 +684,8 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return nil, fmt.Errorf("Failed to showUserGrants in import: %w", err)
 	}
 	for _, foundGrant := range grants {
-		if grantsConflict(desiredGrant, foundGrant) {
+		if grantsConflict(desiredTableGrant, foundGrant) ||
+			grantsConflict(desiredProcedureGrant, foundGrant) {
 			res := resourceGrant().Data(nil)
 			setDataFromGrant(foundGrant, res)
 			return []*schema.ResourceData{res}, nil
@@ -688,20 +697,43 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	return results, nil
 }
 
+func produceGrantId(database string, username string, host string) string {
+	if strings.Compare(database, "*") != 0 && !strings.HasSuffix(database, "`") {
+		reProcedure := regexp.MustCompile(`(?i)^(function|procedure) (.*)$`)
+		if reProcedure.MatchString(database) {
+			// This is only a hack - user can specify function / procedure as database.
+			database = reProcedure.ReplaceAllString(database, "$1 `${2}`")
+		} else {
+			database = fmt.Sprintf("`%s`", database)
+		}
+	}
+
+	return fmt.Sprintf("%s@%s:%s", database, username, host)
+}
+
 // setDataFromGrant copies the values from MySQLGrant to the schema.ResourceData
 // This function is used when importing a new Grant, or when syncing remote state to Terraform state
 // It is responsible for pulling any non-identifying properties (e.g. grant, tls_option) into the Terraform state
 // Identifying properties (database, table) are already set either as part of the import id or required properties
 // of the Terraform resource.
 func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.ResourceData {
+	userOrRole := grant.GetUserOrRole()
 	if tableGrant, ok := grant.(*TablePrivilegeGrant); ok {
 		d.Set("grant", grant.GrantOption())
 		d.Set("tls_option", tableGrant.TLSOption)
-
+		database := tableGrant.Database
+		id := produceGrantId(database, userOrRole.Name, userOrRole.Host)
+		d.SetId(id)
+		d.Set("database", database)
+		d.Set("table", tableGrant.Table)
 	} else if procedureGrant, ok := grant.(*ProcedurePrivilegeGrant); ok {
 		d.Set("grant", grant.GrantOption())
 		d.Set("tls_option", procedureGrant.TLSOption)
-
+		database := procedureGrant.Database
+		id := produceGrantId(database, userOrRole.Name, userOrRole.Host)
+		d.SetId(id)
+		d.Set("database", fmt.Sprintf("procedure %s.%s", database, procedureGrant.CallableName))
+		d.Set("callable_name", procedureGrant.CallableName)
 	} else if roleGrant, ok := grant.(*RoleGrant); ok {
 		d.Set("grant", grant.GrantOption())
 		d.Set("roles", roleGrant.Roles)
@@ -726,7 +758,6 @@ func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.Resource
 
 	// This is a bit of a hack, since we don't have a way to distingush between users and roles
 	// from the grant itself. We can only infer it from the schema.
-	userOrRole := grant.GetUserOrRole()
 	if d.Get("role") != "" {
 		d.Set("role", userOrRole.Name)
 	} else {
@@ -770,7 +801,6 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) 
 		return nil, fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
 	for _, dbGrant := range allGrants {
-
 		// Check if the grants cover the same user, table, database
 		// If not, continue
 		if !grantsConflict(desiredGrant, dbGrant) {
@@ -834,7 +864,6 @@ var (
 )
 
 func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
-
 	// Ignore REVOKE.*
 	if strings.HasPrefix(grantStr, "REVOKE") {
 		log.Printf("[WARN] Partial revokes are not fully supported and lead to unexpected behavior. Consult documentation https://dev.mysql.com/doc/refman/8.0/en/partial-revokes.html on how to disable them for safe and reliable terraform. Relevant partial revoke: %s\n", grantStr)
