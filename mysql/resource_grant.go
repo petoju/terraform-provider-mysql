@@ -732,8 +732,7 @@ func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.Resource
 		database := procedureGrant.Database
 		id := produceGrantId(database, userOrRole.Name, userOrRole.Host)
 		d.SetId(id)
-		d.Set("database", fmt.Sprintf("procedure %s.%s", database, procedureGrant.CallableName))
-		d.Set("callable_name", procedureGrant.CallableName)
+		d.Set("database", fmt.Sprintf("PROCEDURE %s.%s", database, procedureGrant.CallableName))
 	} else if roleGrant, ok := grant.(*RoleGrant); ok {
 		d.Set("grant", grant.GrantOption())
 		d.Set("roles", roleGrant.Roles)

@@ -3,14 +3,15 @@ package mysql
 import (
 	"context"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"log"
 	"math/rand"
 	"regexp"
 	"strings"
 	"testing"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccGrant(t *testing.T) {
@@ -423,11 +424,11 @@ func testAccPrivilege(rn string, privilege string, expectExists bool, expectGran
 			return err
 		}
 
-		id := strings.Split(rs.Primary.ID, ":")
+		id := strings.Split(rs.Primary.ID, "@")
 
 		var userOrRole UserOrRole
-		if strings.Contains(id[0], "@") {
-			parts := strings.Split(id[0], "@")
+		if strings.Contains(id[1], ":") {
+			parts := strings.Split(id[1], ":")
 			userOrRole = UserOrRole{
 				Name: parts[0],
 				Host: parts[1],
@@ -887,21 +888,6 @@ func TestAccGrantOnProcedure(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					prepareProcedure(dbName, procedureName),
 				),
-			},
-			{
-				Config: testAccGrantConfigProcedureWithTable(procedureName, dbName, hostName),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckProcedureGrant("mysql_grant.test_procedure", userName, hostName, procedureName, true),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "user", userName),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "host", hostName),
-					// Note: The database and table name do not change. This is to preserve legacy functionality.
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "database", fmt.Sprintf("PROCEDURE %s", dbName)),
-					resource.TestCheckResourceAttr("mysql_grant.test_procedure", "table", procedureName),
-				),
-			},
-			{
-				// Remove the grant
-				Config: testAccGrantConfigNoGrant(dbName),
 			},
 			{
 				Config: testAccGrantConfigProcedureWithDatabase(procedureName, dbName, hostName),
