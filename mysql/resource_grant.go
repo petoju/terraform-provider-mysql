@@ -698,7 +698,7 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 }
 
 func produceGrantId(database string, username string, host string) string {
-	if strings.Compare(database, "*") != 0 && !strings.HasSuffix(database, "`") {
+	if database != "*" && !strings.HasSuffix(database, "`") {
 		reProcedure := regexp.MustCompile(`(?i)^(function|procedure) (.*)$`)
 		if reProcedure.MatchString(database) {
 			// This is only a hack - user can specify function / procedure as database.
