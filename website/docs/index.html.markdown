@@ -64,6 +64,21 @@ resource "mysql_database" "app" {
 }
 ```
 
+Using encrypted connections can be done by using the `custom_tls` field in the provider
+
+```hcl
+provider "mysql" {
+  endpoint = "my-database.example.com:3306"
+  username = "app-user"
+  custom_tls {
+    config_key  = "custom_key"
+    ca_cert     = "/path/to/certs/ca.pem"
+    client_cert = "/path/to/certs/client_cert.pem"
+    client_key  = "/path/to/certs/client_key.pem"
+  }
+}
+```
+
 ### GCP CloudSQL Connection
 
 For connections to GCP hosted instances, the provider can connect through the Cloud SQL MySQL library.
@@ -116,6 +131,11 @@ The following arguments are supported:
 * `password` - (Optional) Password for the given user, if that user has a password, can also be sourced from the `MYSQL_PASSWORD` environment variable.
 * `proxy` - (Optional) Proxy socks url, can also be sourced from `ALL_PROXY` or `all_proxy` environment variables.
 * `tls` - (Optional) The TLS configuration. One of `false`, `true`, or `skip-verify`. Defaults to `false`. Can also be sourced from the `MYSQL_TLS_CONFIG` environment variable.
+* `custom_tls` - (Optional) Sets custom tls options for the connection. Documentation for encrypted connections can be found [here](https://dev.mysql.com/doc/refman/8.0/en/using-encrypted-connections.html). Consider setting shorter `connect_retry_timeout_sec` for debugging, as the default is 10 minutes .This is a block containing an optional `config_key`, which value is discarded but might be useful when troubleshooting, and the following required arguments:
+  * `ca_cert`
+  * `client_cert`
+  * `client_key`
+
 * `max_conn_lifetime_sec` - (Optional) Sets the maximum amount of time a connection may be reused. If d <= 0, connections are reused forever.
 * `max_open_conns` - (Optional) Sets the maximum number of open connections to the database. If n <= 0, then there is no limit on the number of open connections.
 * `conn_params` - (Optional) Sets extra mysql connection parameters (ODBC parameters). Most useful for session variables such as `default_storage_engine`, `foreign_key_checks` or `sql_log_bin`.

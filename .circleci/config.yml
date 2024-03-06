@@ -3,26 +3,19 @@
 version: 2.1
 
 jobs:
-  gotest:
+  govet:
     docker:
-      - image: golang:1.20
+      - image: golang:1.21
     working_directory: /terraform-provider-mysql
     steps:
       - checkout
-      - run:
-          name: Test
-          environment:
-            # DB override is there only to skip some tests.
-            DB: mysql:something 
-          command: |
-            make test
       - run:
           name: Vet
           command: |
             make vet
   integration:
     machine:
-      image: ubuntu-2004:current
+      image: ubuntu-2204:current
       docker_layer_caching: true
     parameters:
       target:
@@ -46,4 +39,4 @@ workflows:
           matrix:
             parameters:
               target: ["testversion5.6", "testversion5.7", "testversion8.0", "testpercona5.7", "testpercona8.0", "testmariadb10.3", "testmariadb10.8", "testmariadb10.10", "testtidb6.1.0"]
-      - gotest
+      - govet
