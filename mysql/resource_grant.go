@@ -176,20 +176,33 @@ func (t *TablePrivilegeGrant) SQLGrantStatement() string {
 	return stmtSql
 }
 
+// containsAllPrivilege returns true if the privileges list contains an ALL PRIVILEGES grant
+// this is used because there is special case behavior for ALL PRIVILEGES grants. In particular,
+// if a user has ALL PRIVILEGES, we _cannot_ revoke ALL PRIVILEGES, GRANT OPTION because this is
+// invalid syntax.
+// See: https://github.com/petoju/terraform-provider-mysql/issues/120
+func containsAllPrivilege(privileges []string) bool {
+	for _, p := range privileges {
+		if kReAllPrivileges.MatchString(p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *TablePrivilegeGrant) SQLRevokeStatement() string {
 	privs := t.Privileges
-	if t.Grant {
+	if t.Grant && !containsAllPrivilege(privs) {
 		privs = append(privs, "GRANT OPTION")
 	}
 	return fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privs, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
 }
 
 func (t *TablePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
-	if t.Grant {
+	if t.Grant && !containsAllPrivilege(privilegesToRevoke) {
 		privilegesToRevoke = append(privilegesToRevoke, "GRANT OPTION")
 	}
-	stmt := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privilegesToRevoke, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
-	return stmt
+	return fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privilegesToRevoke, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
 }
 
 type ProcedurePrivilegeGrant struct {
@@ -246,7 +259,7 @@ func (t *ProcedurePrivilegeGrant) SQLGrantStatement() string {
 
 func (t *ProcedurePrivilegeGrant) SQLRevokeStatement() string {
 	privs := t.Privileges
-	if t.Grant {
+	if t.Grant && !containsAllPrivilege(privs) {
 		privs = append(privs, "GRANT OPTION")
 	}
 	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
@@ -255,11 +268,10 @@ func (t *ProcedurePrivilegeGrant) SQLRevokeStatement() string {
 
 func (t *ProcedurePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
 	privs := privilegesToRevoke
-	if t.Grant {
+	if t.Grant && !containsAllPrivilege(privilegesToRevoke) {
 		privs = append(privs, "GRANT OPTION")
 	}
-	stmt := fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
-	return stmt
+	return fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
 }
 
 type RoleGrant struct {
@@ -1061,14 +1073,17 @@ func normalizeColumnOrder(perm string) string {
 	return fmt.Sprintf("%s(%s)", precursor, partsTogether)
 }
 
+var kReAllPrivileges = regexp.MustCompile(`ALL ?(PRIVILEGES)?`)
+
 func normalizePerms(perms []string) []string {
 	ret := []string{}
 	for _, perm := range perms {
 		// Remove leading and trailing backticks and spaces
 		permNorm := strings.Trim(perm, "` ")
-
 		permUcase := strings.ToUpper(permNorm)
-		if permUcase == "ALL" || permUcase == "ALLPRIVILEGES" {
+
+		// Normalize ALL and ALLPRIVILEGES to ALL PRIVILEGES
+		if kReAllPrivileges.MatchString(permUcase) {
 			permUcase = "ALL PRIVILEGES"
 		}
 		permSortedColumns := normalizeColumnOrder(permUcase)
