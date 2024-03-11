@@ -183,6 +183,11 @@ func Provider() *schema.Provider {
 				Optional: true,
 				Default:  false,
 			},
+			"private_ip": {
+                                Type:     schema.TypeBool,
+                                Optional: true,
+                                Default:  false,
+                        },
 		},
 
 		DataSourcesMap: map[string]*schema.Resource{
@@ -213,6 +218,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var allowNativePasswords = authPlugin == nativePasswords
 	var password = d.Get("password").(string)
 	var iam_auth = d.Get("iam_database_authentication").(bool)
+	var private_ip = d.Get("private_ip").(bool)
 	var tlsConfig = d.Get("tls").(string)
 	var tlsConfigStruct *tls.Config
 
@@ -272,7 +278,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			opts = append(opts, cloudsqlconn.WithIAMAuthNTokenSources(token, token))
 			_, err = cloudsql.RegisterDriver("cloudsql", opts...)
 		} else {
-			_, err = cloudsql.RegisterDriver("cloudsql")
+			var endpointParams []cloudsqlconn.DialOption
+			if private_ip {
+				endpointParams = append(endpointParams, cloudsqlconn.WithPrivateIP())
+			}
+
+			_, err = cloudsql.RegisterDriver("cloudsql", cloudsqlconn.WithDefaultDialOptions(endpointParams...))
 		}
 		if err != nil {
 			return nil, diag.Errorf("failed to register driver %v", err)
