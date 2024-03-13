@@ -79,6 +79,39 @@ provider "mysql" {
 }
 ```
 
+And via Variables:
+
+```hcl
+variable "mysql_tls_ca_cert" {
+  sensitive = true
+  type = string
+}
+variable "mysql_tls_client_cert" {
+  sensitive = true
+  type = string
+}
+variable "mysql_tls_client_key" {
+  sensitive = true
+  type = string
+}
+
+provider "mysql" {
+  endpoint = "my-database.example.com:3306"
+  username = "app-user"
+  custom_tls {
+    config_key  = "custom_key"
+    ca_cert     = var.mysql_tls_ca_cert
+    client_cert = var.mysql_tls_client_cert
+    client_key  = var.mysql_tls_client_key
+  }
+}
+```
+
+**Note** It it is _strongly_ recommended to ensure that these values/variables are marked as sensitive
+
+
+
+
 ### GCP CloudSQL Connection
 
 For connections to GCP hosted instances, the provider can connect through the Cloud SQL MySQL library.
@@ -132,9 +165,9 @@ The following arguments are supported:
 * `proxy` - (Optional) Proxy socks url, can also be sourced from `ALL_PROXY` or `all_proxy` environment variables.
 * `tls` - (Optional) The TLS configuration. One of `false`, `true`, or `skip-verify`. Defaults to `false`. Can also be sourced from the `MYSQL_TLS_CONFIG` environment variable.
 * `custom_tls` - (Optional) Sets custom tls options for the connection. Documentation for encrypted connections can be found [here](https://dev.mysql.com/doc/refman/8.0/en/using-encrypted-connections.html). Consider setting shorter `connect_retry_timeout_sec` for debugging, as the default is 10 minutes .This is a block containing an optional `config_key`, which value is discarded but might be useful when troubleshooting, and the following required arguments:
-  * `ca_cert`
-  * `client_cert`
-  * `client_key`
+  * `ca_cert` - Local filesystem path or string containing Certificate - If value begins with `-----BEGIN` we assume you're passing the certificate directly, otherwise a file from the local filesystem will be used.
+  * `client_cert` - Local filesystem path or string containing Certificate - If value begins with `-----BEGIN` we assume you're passing the certificate directly, otherwise a file from the local filesystem will be used.
+  * `client_key` - Local filesystem path or string containing Certificate - If value begins with `-----BEGIN` we assume you're passing the certificate directly, otherwise a file from the local filesystem will be used.
 
 * `max_conn_lifetime_sec` - (Optional) Sets the maximum amount of time a connection may be reused. If d <= 0, connections are reused forever.
 * `max_open_conns` - (Optional) Sets the maximum number of open connections to the database. If n <= 0, then there is no limit on the number of open connections.
