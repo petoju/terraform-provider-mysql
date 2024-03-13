@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -235,7 +235,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		if strings.HasPrefix(customTLS.CACert, "-----BEGIN") {
 			pem = []byte(customTLS.CACert)
 		} else {
-			pem, err = ioutil.ReadFile(customTLS.CACert)
+			pem, err = os.ReadFile(customTLS.CACert)
 			if err != nil {
 				return nil, diag.Errorf("failed to read CA cert: %v", err)
 			}
