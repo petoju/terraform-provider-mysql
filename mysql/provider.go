@@ -184,10 +184,10 @@ func Provider() *schema.Provider {
 				Default:  false,
 			},
 			"private_ip": {
-                                Type:     schema.TypeBool,
-                                Optional: true,
-                                Default:  false,
-                        },
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 		},
 
 		DataSourcesMap: map[string]*schema.Resource{
