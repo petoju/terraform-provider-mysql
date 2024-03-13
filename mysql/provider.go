@@ -230,10 +230,15 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			return nil, diag.Errorf("failed to unmarshal tls config: %v", customTLSJson)
 		}
 
+		var pem []byte
 		rootCertPool := x509.NewCertPool()
-		pem, err := ioutil.ReadFile(customTLS.CACert)
-		if err != nil {
-			return nil, diag.Errorf("failed to read CA cert: %v", err)
+		if strings.HasPrefix(customTLS.CACert, "-----BEGIN") {
+			pem = []byte(customTLS.CACert)
+		} else {
+			pem, err = ioutil.ReadFile(customTLS.CACert)
+			if err != nil {
+				return nil, diag.Errorf("failed to read CA cert: %v", err)
+			}
 		}
 
 		if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
@@ -241,10 +246,16 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 
 		clientCert := make([]tls.Certificate, 0, 1)
-		certs, err := tls.LoadX509KeyPair(customTLS.ClientCert, customTLS.ClientKey)
+		var certs tls.Certificate
+		if strings.HasPrefix(customTLS.ClientCert, "-----BEGIN") {
+			certs, err = tls.X509KeyPair([]byte(customTLS.ClientCert), []byte(customTLS.ClientKey))
+		} else {
+			certs, err = tls.LoadX509KeyPair(customTLS.ClientCert, customTLS.ClientKey)
+		}
 		if err != nil {
 			return nil, diag.Errorf("error loading keypair: %v", err)
 		}
+
 		clientCert = append(clientCert, certs)
 		tlsConfigStruct = &tls.Config{
 			RootCAs:      rootCertPool,
