@@ -54,10 +54,15 @@ type MySQLConfiguration struct {
 }
 
 type CustomTLS struct {
-	ConfigKey  string `json:"config_key"`
-	CACert     string `json:"ca_cert"`
-	ClientCert string `json:"client_cert"`
-	ClientKey  string `json:"client_key"`
+	ConfigKey string `json:"config_key,omitempty"`
+
+	CACertFile     string `json:"ca_cert_file,omitempty"`
+	ClientCertFile string `json:"client_cert_file,omitempty"`
+	ClientKeyFile  string `json:"client_key_file,omitempty"`
+
+	CACert     string `json:"ca_cert,omitempty"`
+	ClientCert string `json:"client_cert,omitempty"`
+	ClientKey  string `json:"client_key,omitempty"`
 }
 
 var (
@@ -232,10 +237,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 
 		var pem []byte
 		rootCertPool := x509.NewCertPool()
-		if strings.HasPrefix(customTLS.CACert, "-----BEGIN") {
+		if customTLS.CACert != "" {
 			pem = []byte(customTLS.CACert)
 		} else {
-			pem, err = ioutil.ReadFile(customTLS.CACert)
+			pem, err = ioutil.ReadFile(customTLS.CACertFile)
 			if err != nil {
 				return nil, diag.Errorf("failed to read CA cert: %v", err)
 			}
@@ -247,10 +252,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 
 		clientCert := make([]tls.Certificate, 0, 1)
 		var certs tls.Certificate
-		if strings.HasPrefix(customTLS.ClientCert, "-----BEGIN") {
+		if customTLS.ClientCert != "" {
 			certs, err = tls.X509KeyPair([]byte(customTLS.ClientCert), []byte(customTLS.ClientKey))
 		} else {
-			certs, err = tls.LoadX509KeyPair(customTLS.ClientCert, customTLS.ClientKey)
+			certs, err = tls.LoadX509KeyPair(customTLS.ClientCertFile, customTLS.ClientKeyFile)
 		}
 		if err != nil {
 			return nil, diag.Errorf("error loading keypair: %v", err)
