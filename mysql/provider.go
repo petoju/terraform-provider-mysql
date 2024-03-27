@@ -309,6 +309,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		azScope := "https://ossrdbms-aad.database.windows.net"
 		if os.Getenv("ARM_ENVIRONMENT") == "china" {
 			azScope = "https://ossrdbms-aad.database.chinacloudapi.cn"
+		} else if os.Getenv("ARM_ENVIRONMENT") == "german" {
+			azScope = "https://ossrdbms-aad.database.chinacloudapi.de"
+		} else if os.Getenv("ARM_ENVIRONMENT") == "usgovernment" {
+			azScope = "https://ossrdbms-aad.database.usgovcloudapi.net
 		}
 
 		if err != nil {
