@@ -312,7 +312,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		} else if os.Getenv("ARM_ENVIRONMENT") == "german" {
 			azScope = "https://ossrdbms-aad.database.chinacloudapi.de"
 		} else if os.Getenv("ARM_ENVIRONMENT") == "usgovernment" {
-			azScope = "https://ossrdbms-aad.database.usgovcloudapi.net
+			azScope = "https://ossrdbms-aad.database.usgovcloudapi.net"
 		}
 
 		if err != nil {
