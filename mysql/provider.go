@@ -204,6 +204,7 @@ func Provider() *schema.Provider {
 			"mysql_user":            resourceUser(),
 			"mysql_ti_config":       resourceTiConfigVariable(),
 			"mysql_rds_config":      resourceRDSConfig(),
+			"mysql_default_roles":   resourceDefaultRoles(),
 		},
 
 		ConfigureContextFunc: providerConfigure,
