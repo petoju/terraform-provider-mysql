@@ -83,7 +83,7 @@ func testAccDefaultRoles(rn string, roles ...string) resource.TestCheckFunc {
 		log.Println("Executing statement:", stmtSQL)
 		rows, err := db.Query(stmtSQL)
 		if err != nil {
-			return fmt.Errorf("error reading user default roles: %s", err)
+			return fmt.Errorf("error reading user default roles: %w", err)
 		}
 		defer rows.Close()
 
@@ -93,7 +93,7 @@ func testAccDefaultRoles(rn string, roles ...string) resource.TestCheckFunc {
 			var role string
 			err := rows.Scan(&role)
 			if err != nil {
-				return fmt.Errorf("error reading user default roles: %s", err)
+				return fmt.Errorf("error reading user default roles: %w", err)
 			}
 			dbRoles = append(dbRoles, role)
 		}
@@ -133,7 +133,7 @@ func testAccDefaultRolesCheckDestroy(s *terraform.State) error {
 		var count int
 		err := db.QueryRow(stmtSQL).Scan(&count)
 		if err != nil {
-			return fmt.Errorf("error issuing query: %s", err)
+			return fmt.Errorf("error issuing query: %w", err)
 		}
 		if count > 0 {
 			return fmt.Errorf("default roles still exist after destroy")

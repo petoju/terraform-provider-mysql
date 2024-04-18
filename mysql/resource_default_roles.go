@@ -71,7 +71,7 @@ func alterUserDefaultRoles(ctx context.Context, db *sql.DB, user, host string, r
 	log.Println("Executing statement:", stmtSQL)
 	_, err := db.ExecContext(ctx, stmtSQL)
 	if err != nil {
-		return fmt.Errorf("failed executing SQL: %v", err)
+		return fmt.Errorf("failed executing SQL: %w", err)
 	}
 
 	return nil
@@ -200,12 +200,12 @@ func ImportDefaultRoles(ctx context.Context, d *schema.ResourceData, meta interf
 	d.Set("user", userHost[0])
 	d.Set("host", userHost[1])
 
-	var err error
-
-	readErr := ReadDefaultRoles(ctx, d, meta)
-	if readErr.HasError() {
-		err = fmt.Errorf("failed reading default roles: %v", err)
+	readDiags := ReadDefaultRoles(ctx, d, meta)
+	for _, readDiag := range readDiags {
+		if readDiag.Severity == diag.Error {
+			return nil, fmt.Errorf("failed to read default roles: %s", readDiag.Summary)
+		}
 	}
 
-	return []*schema.ResourceData{d}, err
+	return []*schema.ResourceData{d}, nil
 }
