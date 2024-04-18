@@ -414,6 +414,9 @@ func parseResourceFromData(d *schema.ResourceData) (MySQLGrant, diag.Diagnostics
 	userAttr, userOk := d.GetOk("user")
 	hostAttr, hostOk := d.GetOk("host")
 	roleAttr, roleOk := d.GetOk("role")
+	if (userOk && userAttr.(string) == "") && (roleOk && roleAttr == "") {
+		return nil, diag.Errorf("User or role name must be specified")
+	}
 	if userOk && hostOk && userAttr.(string) != "" && hostAttr.(string) != "" {
 		userOrRole = UserOrRole{
 			Name: userAttr.(string),
