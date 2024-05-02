@@ -36,9 +36,10 @@ import (
 )
 
 const (
-	cleartextPasswords = "cleartext"
-	nativePasswords    = "native"
-	unknownUserErrCode = 1396
+	cleartextPasswords  = "cleartext"
+	nativePasswords     = "native"
+	userNotFoundErrCode = 1133
+	unknownUserErrCode  = 1396
 )
 
 type OneConnection struct {
@@ -532,7 +533,11 @@ func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*OneCon
 		return nil, fmt.Errorf("could not connect to server: %s", retryError)
 	}
 	db.SetConnMaxLifetime(conf.MaxConnLifetime)
-	db.SetMaxOpenConns(conf.MaxOpenConns)
+
+	// We used to set conf.MaxOpenConns, but then some connections are open outside our control
+	// and without our settings like no ANSI_QUOTES.
+	// TODO: find a way to support more open connections while able to set custom settings for each of them.
+	db.SetMaxOpenConns(1)
 
 	currentVersion, err := afterConnectVersion(ctx, conf, db)
 	if err != nil {

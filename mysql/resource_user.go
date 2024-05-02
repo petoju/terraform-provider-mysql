@@ -351,11 +351,11 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		var createUserStmt string
 		err := db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
 		if err != nil {
-			if mysqlErrorNumber(err) == unknownUserErrCode {
+			if mysqlErrorNumber(err) == unknownUserErrCode || mysqlErrorNumber(err) == userNotFoundErrCode {
 				d.SetId("")
 				return nil
 			}
-			return diag.Errorf("failed getting version: %v", err)
+			return diag.Errorf("failed getting user: %v", err)
 		}
 
 		// Examples of create user:
