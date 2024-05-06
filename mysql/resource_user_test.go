@@ -14,9 +14,9 @@ import (
 
 func TestAccUser_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_basic,
@@ -54,9 +54,9 @@ func TestAccUser_basic(t *testing.T) {
 
 func TestAccUser_auth(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipTiDB(t); testAccPreCheckSkipMariaDB(t); testAccPreCheckSkipRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		PreCheck:          func() { testAccPreCheckSkipTiDB(t); testAccPreCheckSkipMariaDB(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_auth_iam_plugin,
@@ -96,8 +96,8 @@ func TestAccUser_authConnect(t *testing.T) {
 			testAccPreCheckSkipMariaDB(t)
 			testAccPreCheckSkipRds(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_basic,
@@ -137,8 +137,8 @@ func TestAccUser_authConnectRetainOldPassword(t *testing.T) {
 			testAccPreCheckSkipRds(t)
 			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.14")
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_basic_retain_old_password,
@@ -166,9 +166,9 @@ func TestAccUser_authConnectRetainOldPassword(t *testing.T) {
 
 func TestAccUser_deprecated(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_deprecated,
