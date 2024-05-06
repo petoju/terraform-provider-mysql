@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
@@ -658,16 +657,11 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 }
 
 func isNonExistingGrant(err error) bool {
-	if driverErr, ok := err.(*mysql.MySQLError); ok {
-		// 1141 = ER_NONEXISTING_GRANT
-		// 1147 = ER_NONEXISTING_TABLE_GRANT
-		// 1403 = ER_NONEXISTING_PROC_GRANT
-
-		if driverErr.Number == 1141 || driverErr.Number == 1147 || driverErr.Number == 1403 {
-			return true
-		}
-	}
-	return false
+	errorNumber := mysqlErrorNumber(err)
+	// 1141 = ER_NONEXISTING_GRANT
+	// 1147 = ER_NONEXISTING_TABLE_GRANT
+	// 1403 = ER_NONEXISTING_PROC_GRANT
+	return errorNumber == 1141 || errorNumber == 1147 || errorNumber == 1403
 }
 
 func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {

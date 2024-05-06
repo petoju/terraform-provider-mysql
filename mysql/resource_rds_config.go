@@ -153,16 +153,16 @@ func DeleteRDSConfig(ctx context.Context, d *schema.ResourceData, meta interface
 func RDSConfigSQL(d *schema.ResourceData) []string {
 	result := []string{}
 	if d.Get("binlog_retention_hours") != nil {
-		retention_period := strconv.Itoa(d.Get("binlog_retention_hours").(int))
-		if retention_period == "0" {
-			retention_period = "NULL"
+		retentionPeriod := strconv.Itoa(d.Get("binlog_retention_hours").(int))
+		if retentionPeriod == "0" {
+			retentionPeriod = "NULL"
 		}
-		result = append(result, (fmt.Sprintf("call mysql.rds_set_configuration('binlog retention hours', %s)", retention_period)))
+		result = append(result, fmt.Sprintf("call mysql.rds_set_configuration('binlog retention hours', %s)", retentionPeriod))
 	}
 
 	if d.Get("replication_target_delay") != nil {
-		target_delay := d.Get("replication_target_delay")
-		result = append(result, (fmt.Sprintf("call mysql.rds_set_configuration('target delay', %v)", target_delay)))
+		targetDelay := d.Get("replication_target_delay")
+		result = append(result, fmt.Sprintf("call mysql.rds_set_configuration('target delay', %v)", targetDelay))
 	}
 
 	return result

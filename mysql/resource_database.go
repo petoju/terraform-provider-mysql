@@ -8,7 +8,6 @@ import (
 	"log"
 	"strings"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
@@ -102,11 +101,9 @@ func ReadDatabase(ctx context.Context, d *schema.ResourceData, meta interface{})
 	var createSQL, _database string
 	err = db.QueryRowContext(ctx, stmtSQL).Scan(&_database, &createSQL)
 	if err != nil {
-		if mysqlErr, ok := err.(*mysql.MySQLError); ok {
-			if mysqlErr.Number == unknownDatabaseErrCode {
-				d.SetId("")
-				return nil
-			}
+		if mysqlErrorNumber(err) == unknownDatabaseErrCode {
+			d.SetId("")
+			return nil
 		}
 		return diag.Errorf("Error during show create database: %s", err)
 	}

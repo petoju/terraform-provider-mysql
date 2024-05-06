@@ -7,9 +7,9 @@ import (
 
 func TestAccUserPassword_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccUserCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccUserPasswordConfig_basic,

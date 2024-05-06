@@ -18,9 +18,9 @@ func TestAccGrant(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	userName := fmt.Sprintf("jdoe-%s", dbName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigBasic(dbName),
@@ -56,9 +56,9 @@ func TestAccRevokePrivRefresh(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigBasic(dbName),
@@ -101,9 +101,9 @@ func TestAccRevokePrivRefresh(t *testing.T) {
 func TestAccBroken(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigBasic(dbName),
@@ -137,8 +137,8 @@ func TestAccDifferentHosts(t *testing.T) {
 			testAccPreCheck(t)
 			testAccPreCheckSkipTiDB(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigExtraHost(dbName, false),
@@ -168,9 +168,9 @@ func TestAccDifferentHosts(t *testing.T) {
 func TestAccGrantComplex(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipTiDB(t); testAccPreCheckSkipRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheckSkipTiDB(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				// Create table first
@@ -302,8 +302,8 @@ func TestAccGrantComplexMySQL8(t *testing.T) {
 			testAccPreCheckSkipMariaDB(t)
 			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				// Create table first
@@ -333,8 +333,8 @@ func TestAccGrant_role(t *testing.T) {
 			testAccPreCheckSkipRds(t)
 			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigRole(dbName, roleName),
@@ -368,8 +368,8 @@ func TestAccGrant_roleToUser(t *testing.T) {
 			testAccPreCheckSkipRds(t)
 			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigRoleToUser(dbName, roleName),
@@ -391,8 +391,8 @@ func TestAccGrant_complexRoleGrants(t *testing.T) {
 			testAccPreCheckSkipMariaDB(t)
 			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigComplexRoleGrants(dbName),
@@ -897,9 +897,9 @@ func TestAccGrantOnProcedure(t *testing.T) {
 	hostName := "%"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipTiDB(t); testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheckSkipTiDB(t); testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				// Create table first
@@ -1097,9 +1097,9 @@ func TestAllowDuplicateUsersDifferentTables(t *testing.T) {
 	`, dbName, dbName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				// Create table first
@@ -1162,9 +1162,9 @@ func TestDisallowDuplicateUsersSameTable(t *testing.T) {
 	`, dbName, dbName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGrantCheckDestroy,
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccGrantConfigNoGrant(dbName),

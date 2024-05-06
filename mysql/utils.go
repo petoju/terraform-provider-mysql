@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
+	"github.com/go-sql-driver/mysql"
+	"google.golang.org/api/googleapi"
 	"log"
 	"sync"
 
@@ -68,4 +71,31 @@ func getVersionFromMeta(ctx context.Context, meta interface{}) *version.Version 
 	}
 
 	return oneConnection.Version
+}
+
+// 0 == not mysql error or not error at all.
+func mysqlErrorNumber(err error) uint16 {
+	if err == nil {
+		return 0
+	}
+	var mysqlError *mysql.MySQLError
+	ok := errors.As(err, &mysqlError)
+	if !ok {
+		return 0
+	}
+	return mysqlError.Number
+}
+
+func cloudsqlErrorNumber(err error) int {
+	if err == nil {
+		return 0
+	}
+
+	var gapiError *googleapi.Error
+	if errors.As(err, &gapiError) {
+		if gapiError.Code >= 400 && gapiError.Code < 500 {
+			return gapiError.Code
+		}
+	}
+	return 0
 }

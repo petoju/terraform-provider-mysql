@@ -30,13 +30,15 @@ import (
 // You can run the tests like this:
 //    make testacc TEST=./builtin/providers/mysql
 
-var testAccProviders map[string]*schema.Provider
+var testAccProviderFactories map[string]func() (*schema.Provider, error)
+
+// var testAccProviders map[string]*schema.Provider
 var testAccProvider *schema.Provider
 
 func init() {
 	testAccProvider = Provider()
-	testAccProviders = map[string]*schema.Provider{
-		"mysql": testAccProvider,
+	testAccProviderFactories = map[string]func() (*schema.Provider, error){
+		"mysql": func() (*schema.Provider, error) { return testAccProvider, nil },
 	}
 }
 
@@ -47,7 +49,7 @@ func TestProvider(t *testing.T) {
 }
 
 func TestProvider_impl(t *testing.T) {
-	var _ *schema.Provider = Provider()
+	var _ = Provider()
 }
 
 func testAccPreCheck(t *testing.T) {

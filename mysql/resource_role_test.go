@@ -35,11 +35,11 @@ func TestAccRole_basic(t *testing.T) {
 				t.Skip("Roles require MySQL 8+")
 			}
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccRoleCheckDestroy(roleName),
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccRoleCheckDestroy(roleName),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccRoleConfig_basic(roleName),
+				Config: testAccRoleConfigBasic(roleName),
 				Check: resource.ComposeTestCheckFunc(
 					testAccRoleExists(roleName),
 					resource.TestCheckResourceAttr(resourceName, "name", roleName),
@@ -67,7 +67,7 @@ func testAccRoleExists(roleName string) resource.TestCheckFunc {
 			return nil
 		}
 
-		return fmt.Errorf("No grants found for role %s", roleName)
+		return fmt.Errorf("no grants found for role %s", roleName)
 	}
 }
 
@@ -97,14 +97,14 @@ func testAccRoleCheckDestroy(roleName string) resource.TestCheckFunc {
 
 		count, err := testAccGetRoleGrantCount(roleName, db)
 		if count > 0 {
-			return fmt.Errorf("Role %s still has grants/exists", roleName)
+			return fmt.Errorf("role %s still has grants/exists", roleName)
 		}
 
 		return nil
 	}
 }
 
-func testAccRoleConfig_basic(roleName string) string {
+func testAccRoleConfigBasic(roleName string) string {
 	return fmt.Sprintf(`
 resource "mysql_role" "test" {
   name = "%s"

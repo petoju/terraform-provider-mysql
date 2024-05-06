@@ -351,7 +351,8 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		var createUserStmt string
 		err := db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
 		if err != nil {
-			if mysqlErrorNumber(err) == unknownUserErrCode || mysqlErrorNumber(err) == userNotFoundErrCode {
+			errorNumber := mysqlErrorNumber(err)
+			if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode {
 				d.SetId("")
 				return nil
 			}

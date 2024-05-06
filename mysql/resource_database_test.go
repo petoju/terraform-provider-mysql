@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-sql-driver/mysql"
-
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
@@ -15,18 +13,18 @@ import (
 func TestAccDatabase(t *testing.T) {
 	dbName := "terraform_acceptance_test"
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipTiDB(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccDatabaseCheckDestroy(dbName),
+		PreCheck:          func() { testAccPreCheckSkipTiDB(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccDatabaseCheckDestroy(dbName),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDatabaseConfig_basic(dbName),
-				Check: testAccDatabaseCheck_basic(
+				Config: testAccDatabaseConfigBasic(dbName),
+				Check: testAccDatabaseCheckBasic(
 					"mysql_database.test", dbName,
 				),
 			},
 			{
-				Config:            testAccDatabaseConfig_basic(dbName),
+				Config:            testAccDatabaseConfigBasic(dbName),
 				ResourceName:      "mysql_database.test",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -48,14 +46,14 @@ func TestAccDatabase_collationChange(t *testing.T) {
 	ctx := context.Background()
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipTiDB(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccDatabaseCheckDestroy(dbName),
+		PreCheck:          func() { testAccPreCheckSkipTiDB(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccDatabaseCheckDestroy(dbName),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDatabaseConfig_full(dbName, charset1, collation1),
+				Config: testAccDatabaseConfigFull(dbName, charset1, collation1),
 				Check: resource.ComposeTestCheckFunc(
-					testAccDatabaseCheck_full("mysql_database.test", dbName, charset1, collation1),
+					testAccDatabaseCheckFull("mysql_database.test", dbName, charset1, collation1),
 				),
 			},
 			{
@@ -72,20 +70,20 @@ func TestAccDatabase_collationChange(t *testing.T) {
 
 					db.Exec(fmt.Sprintf("ALTER DATABASE %s CHARACTER SET %s COLLATE %s", dbName, charset2, collation2))
 				},
-				Config: testAccDatabaseConfig_full(dbName, charset1, collation1),
+				Config: testAccDatabaseConfigFull(dbName, charset1, collation1),
 				Check: resource.ComposeTestCheckFunc(
-					testAccDatabaseCheck_full(resourceName, dbName, charset1, collation1),
+					testAccDatabaseCheckFull(resourceName, dbName, charset1, collation1),
 				),
 			},
 		},
 	})
 }
 
-func testAccDatabaseCheck_basic(rn string, name string) resource.TestCheckFunc {
-	return testAccDatabaseCheck_full(rn, name, "utf8mb4", "utf8mb4_bin")
+func testAccDatabaseCheckBasic(rn string, name string) resource.TestCheckFunc {
+	return testAccDatabaseCheckFull(rn, name, "utf8mb4", "utf8mb4_bin")
 }
 
-func testAccDatabaseCheck_full(rn string, name string, charset string, collation string) resource.TestCheckFunc {
+func testAccDatabaseCheckFull(rn string, name string, charset string, collation string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]
 		if !ok {
@@ -133,21 +131,19 @@ func testAccDatabaseCheckDestroy(name string) resource.TestCheckFunc {
 			return fmt.Errorf("database still exists after destroy")
 		}
 
-		if mysqlErr, ok := err.(*mysql.MySQLError); ok {
-			if mysqlErr.Number == unknownDatabaseErrCode {
-				return nil
-			}
+		if mysqlErrorNumber(err) == unknownDatabaseErrCode {
+			return nil
 		}
 
 		return fmt.Errorf("got unexpected error: %s", err)
 	}
 }
 
-func testAccDatabaseConfig_basic(name string) string {
-	return testAccDatabaseConfig_full(name, "utf8mb4", "utf8mb4_bin")
+func testAccDatabaseConfigBasic(name string) string {
+	return testAccDatabaseConfigFull(name, "utf8mb4", "utf8mb4_bin")
 }
 
-func testAccDatabaseConfig_full(name string, charset string, collation string) string {
+func testAccDatabaseConfigFull(name string, charset string, collation string) string {
 	return fmt.Sprintf(`
 resource "mysql_database" "test" {
     name = "%s"

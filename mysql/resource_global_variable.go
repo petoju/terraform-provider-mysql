@@ -44,7 +44,7 @@ func resourceGlobalVariable() *schema.Resource {
 }
 
 func CreateOrUpdateGlobalVariable(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	var sql string
+	var sqlCommand string
 
 	db, err := getDatabaseFromMeta(ctx, meta)
 	if err != nil {
@@ -57,14 +57,14 @@ func CreateOrUpdateGlobalVariable(ctx context.Context, d *schema.ResourceData, m
 
 	// Detect number or string
 	if _, err := strconv.ParseFloat(value, 64); err == nil {
-		sql = fmt.Sprintf("%s%s", sqlBaseQuery, value)
+		sqlCommand = fmt.Sprintf("%s%s", sqlBaseQuery, value)
 	} else {
-		sql = fmt.Sprintf("%s'%s'", sqlBaseQuery, value)
+		sqlCommand = fmt.Sprintf("%s'%s'", sqlBaseQuery, value)
 	}
 
-	log.Printf("[DEBUG] SQL: %s", sql)
+	log.Printf("[DEBUG] SQL: %s", sqlCommand)
 
-	_, err = db.ExecContext(ctx, sql)
+	_, err = db.ExecContext(ctx, sqlCommand)
 	if err != nil {
 		return diag.Errorf("error setting value: %s", err)
 	}
@@ -106,10 +106,10 @@ func DeleteGlobalVariable(ctx context.Context, d *schema.ResourceData, meta inte
 	}
 	name := d.Get("name").(string)
 
-	sql := fmt.Sprintf("SET GLOBAL %s = DEFAULT", quoteIdentifier(name))
-	log.Printf("[DEBUG] SQL: %s", sql)
+	sqlCommand := fmt.Sprintf("SET GLOBAL %s = DEFAULT", quoteIdentifier(name))
+	log.Printf("[DEBUG] SQL: %s", sqlCommand)
 
-	_, err = db.ExecContext(ctx, sql)
+	_, err = db.ExecContext(ctx, sqlCommand)
 	if err != nil {
 		log.Printf("[WARN] Variable_name (%s) not found; removing from state", d.Id())
 		d.SetId("")

@@ -17,11 +17,11 @@ func TestAccResourceRDS(t *testing.T) {
 	binlog := 24
 	targetDelay := 3200
 	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheckSkipNotRds(t) },
-		Providers: testAccProviders,
+		PreCheck:          func() { testAccPreCheckSkipNotRds(t) },
+		ProviderFactories: testAccProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccRDSConfig_basic(rName, binlog, targetDelay),
+				Config: testAccRDSConfigBasic(rName, binlog, targetDelay),
 				Check: resource.ComposeTestCheckFunc(
 					testAccRDSConfigExists(fmt.Sprintf("mysql_rds_config.%s", rName)),
 					resource.TestCheckResourceAttr(fmt.Sprintf("mysql_rds_config.%s", rName), "binlog_retention_hours", fmt.Sprintf("%d", binlog)),
@@ -32,7 +32,7 @@ func TestAccResourceRDS(t *testing.T) {
 	})
 }
 
-func testAccRDSConfig_basic(rName string, binlog int, replication int) string {
+func testAccRDSConfigBasic(rName string, binlog int, replication int) string {
 	return fmt.Sprintf(`
 resource "mysql_rds_config" "%s" {
                 binlog_retention_hours = %d
@@ -105,12 +105,12 @@ func TestAccResourceRDSConfigChange(t *testing.T) {
 	ctx := context.Background()
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheckSkipNotRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccRDSCheckDestroy(),
+		PreCheck:          func() { testAccPreCheckSkipNotRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccRDSCheckDestroy(),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccRDSConfig_basic(rName, binlog, targetDelay),
+				Config: testAccRDSConfigBasic(rName, binlog, targetDelay),
 				Check: resource.ComposeTestCheckFunc(
 					testAccRDSConfigExists(fmt.Sprintf("mysql_rds_config.%s", rName)),
 				),
@@ -136,14 +136,14 @@ func TestAccResourceRDSConfigChange(t *testing.T) {
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testAccRDSConfigExists(fmt.Sprintf("mysql_rds_config.%s", rName)),
-					testAccRDSCheck_full(fullResourceName, binlogUpdated, targetDelayUpdated),
+					testAccRDSCheckFull(fullResourceName, binlogUpdated, targetDelayUpdated),
 				),
 			},
 		},
 	})
 }
 
-func testAccRDSCheck_full(rn string, binlogUpdated, targetDelayUpdated int) resource.TestCheckFunc {
+func testAccRDSCheckFull(rn string, binlogUpdated, targetDelayUpdated int) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]
 		if !ok {

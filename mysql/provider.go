@@ -6,8 +6,8 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"log"
 	"net"
 	"net/url"
@@ -19,10 +19,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
-	"google.golang.org/api/googleapi"
-
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
@@ -83,7 +80,7 @@ func Provider() *schema.Provider {
 				ValidateFunc: func(v interface{}, k string) (ws []string, errors []error) {
 					value := v.(string)
 					if value == "" {
-						errors = append(errors, fmt.Errorf("Endpoint must not be an empty string"))
+						errors = append(errors, fmt.Errorf("endpoint must not be an empty string"))
 					}
 
 					return
@@ -219,8 +216,8 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var allowClearTextPasswords = authPlugin == cleartextPasswords
 	var allowNativePasswords = authPlugin == nativePasswords
 	var password = d.Get("password").(string)
-	var iam_auth = d.Get("iam_database_authentication").(bool)
-	var private_ip = d.Get("private_ip").(bool)
+	var iamAuth = d.Get("iam_database_authentication").(bool)
+	var privateIp = d.Get("private_ip").(bool)
 	var tlsConfig = d.Get("tls").(string)
 	var tlsConfigStruct *tls.Config
 
@@ -230,12 +227,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		customMap := customTLSMap[0].(map[string]interface{})
 		customTLSJson, err := json.Marshal(customMap)
 		if err != nil {
-			return nil, diag.Errorf("failed to marshal tls config: %v", customTLSMap)
+			return nil, diag.Errorf("failed to marshal tls config %v with error %v", customTLSMap, err)
 		}
 
 		err = json.Unmarshal(customTLSJson, &customTLS)
 		if err != nil {
-			return nil, diag.Errorf("failed to unmarshal tls config: %v", customTLSJson)
+			return nil, diag.Errorf("failed to unmarshal tls config %v with error %v", customTLSJson, err)
 		}
 
 		var pem []byte
@@ -269,7 +266,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			RootCAs:      rootCertPool,
 			Certificates: clientCert,
 		}
-		mysql.RegisterTLSConfig(customTLS.ConfigKey, tlsConfigStruct)
+		err = mysql.RegisterTLSConfig(customTLS.ConfigKey, tlsConfigStruct)
+		if err != nil {
+			return nil, diag.Errorf("failed registering TLS config: %v", err)
+		}
 		tlsConfig = customTLS.ConfigKey
 	}
 
@@ -280,7 +280,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		proto = "cloudsql"
 		endpoint = strings.ReplaceAll(endpoint, "cloudsql://", "")
 		var err error
-		if iam_auth { // Access token will be in the password field
+		if iamAuth { // Access token will be in the password field
 
 			var opts []cloudsqlconn.Option
 
@@ -292,7 +292,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			_, err = cloudsql.RegisterDriver("cloudsql", opts...)
 		} else {
 			var endpointParams []cloudsqlconn.DialOption
-			if private_ip {
+			if privateIp {
 				endpointParams = append(endpointParams, cloudsqlconn.WithPrivateIP())
 			}
 
@@ -508,22 +508,22 @@ func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*OneCon
 	// when Terraform thinks it's available and when it is actually available.
 	// This is particularly acute when provisioning a server and then immediately
 	// trying to provision a database on it.
-	retryError := resource.RetryContext(ctx, conf.ConnectRetryTimeoutSec, func() *resource.RetryError {
+	retryError := retry.RetryContext(ctx, conf.ConnectRetryTimeoutSec, func() *retry.RetryError {
 		db, err = sql.Open(driverName, conf.Config.FormatDSN())
 		if err != nil {
 			if mysqlErrorNumber(err) != 0 || cloudsqlErrorNumber(err) != 0 || ctx.Err() != nil {
-				return resource.NonRetryableError(err)
+				return retry.NonRetryableError(err)
 			}
-			return resource.RetryableError(err)
+			return retry.RetryableError(err)
 		}
 
 		err = db.PingContext(ctx)
 		if err != nil {
 			if mysqlErrorNumber(err) != 0 || cloudsqlErrorNumber(err) != 0 || ctx.Err() != nil {
-				return resource.NonRetryableError(err)
+				return retry.NonRetryableError(err)
 			}
 
-			return resource.RetryableError(err)
+			return retry.RetryableError(err)
 		}
 
 		return nil
@@ -548,30 +548,4 @@ func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*OneCon
 		Db:      db,
 		Version: currentVersion,
 	}, nil
-}
-
-// 0 == not mysql error or not error at all.
-func mysqlErrorNumber(err error) uint16 {
-	if err == nil {
-		return 0
-	}
-	me, ok := err.(*mysql.MySQLError)
-	if !ok {
-		return 0
-	}
-	return me.Number
-}
-
-func cloudsqlErrorNumber(err error) int {
-	if err == nil {
-		return 0
-	}
-
-	var gapiError *googleapi.Error
-	if errors.As(err, &gapiError) {
-		if gapiError.Code >= 400 && gapiError.Code < 500 {
-			return gapiError.Code
-		}
-	}
-	return 0
 }

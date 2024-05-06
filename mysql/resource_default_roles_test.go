@@ -17,8 +17,8 @@ func TestAccDefaultRoles_basic(t *testing.T) {
 			testAccPreCheckSkipNotMySQL8(t)
 			testAccPreCheckSkipMariaDB(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccDefaultRolesCheckDestroy,
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccDefaultRolesCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccDefaultRoles_basic,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
@@ -121,13 +122,13 @@ func ReadConfigVariable(ctx context.Context, d *schema.ResourceData, meta interf
 
 	configQuery := fmt.Sprintf("SHOW CONFIG WHERE type = '%s' AND name = '%s'", splitedResType, splitedResName)
 	if len(indexParts) > 2 {
-		configQuery = configQuery + fmt.Sprintf(" AND instance = '%s'", (indexParts[2]))
+		configQuery = configQuery + fmt.Sprintf(" AND instance = '%s'", indexParts[2])
 	}
 
 	log.Printf("[DEBUG] SQL: %s\n", configQuery)
 
 	err = db.QueryRow(configQuery).Scan(&resType, &resInstance, &resName, &resValue)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		d.SetId("")
 		return diag.Errorf("error during show config variables: %s", err)
 	}

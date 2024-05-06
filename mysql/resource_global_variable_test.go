@@ -17,12 +17,12 @@ func TestAccGlobalVar_basic(t *testing.T) {
 	varValue := "1"
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t); testAccPreCheckSkipRds(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGlobalVarCheckDestroy(varName, varValue),
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGlobalVarCheckDestroy(varName, varValue),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccGlobalVarConfig_basic(varName, varValue),
+				Config: testAccGlobalVarConfigBasic(varName, varValue),
 				Check: resource.ComposeTestCheckFunc(
 					testAccGlobalVarExists(varName, varValue),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
@@ -44,22 +44,22 @@ func TestAccGlobalVar_parseString(t *testing.T) {
 			testAccPreCheckSkipNotTiDB(t)
 			testAccPreCheckSkipRds(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGlobalVarCheckDestroy(varName, varValue),
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGlobalVarCheckDestroy(varName, varValue),
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccGlobalVarConfig_basic(varName, "varValue'varValue"),
+				Config:      testAccGlobalVarConfigBasic(varName, "varValue'varValue"),
 				ExpectError: regexp.MustCompile(".*is badly formatted.*"),
 			},
 			{
-				Config: testAccGlobalVarConfig_basic("tidb_auto_analyze_ratio", "0.4"),
+				Config: testAccGlobalVarConfigBasic("tidb_auto_analyze_ratio", "0.4"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccGlobalVarExists("tidb_auto_analyze_ratio", "0.4"),
 					resource.TestCheckResourceAttr(resourceName, "name", "tidb_auto_analyze_ratio"),
 				),
 			},
 			{
-				Config: testAccGlobalVarConfig_basic(varName, varValue),
+				Config: testAccGlobalVarConfigBasic(varName, varValue),
 				Check: resource.ComposeTestCheckFunc(
 					testAccGlobalVarExists(varName, varValue),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
@@ -81,11 +81,11 @@ func TestAccGlobalVar_parseFloat(t *testing.T) {
 			testAccPreCheckSkipNotTiDB(t)
 			testAccPreCheckSkipRds(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGlobalVarCheckDestroy(varName, varValue),
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGlobalVarCheckDestroy(varName, varValue),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccGlobalVarConfig_basic(varName, varValue),
+				Config: testAccGlobalVarConfigBasic(varName, varValue),
 				Check: resource.ComposeTestCheckFunc(
 					testAccGlobalVarExists(varName, varValue),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
@@ -107,11 +107,11 @@ func TestAccGlobalVar_parseBoolean(t *testing.T) {
 			testAccPreCheckSkipNotTiDB(t)
 			testAccPreCheckSkipRds(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccGlobalVarCheckDestroy(varName, varValue),
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGlobalVarCheckDestroy(varName, varValue),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccGlobalVarConfig_basic(varName, varValue),
+				Config: testAccGlobalVarConfigBasic(varName, varValue),
 				Check: resource.ComposeTestCheckFunc(
 					testAccGlobalVarExists(varName, varValue),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
@@ -170,14 +170,14 @@ func testAccGlobalVarCheckDestroy(varName, varExpected string) resource.TestChec
 
 		res, _ := testAccGetGlobalVar(varName, db)
 		if res == varExpected {
-			return fmt.Errorf("Global variable '%s' still has non default value", varName)
+			return fmt.Errorf("global variable '%s' still has non default value", varName)
 		}
 
 		return nil
 	}
 }
 
-func testAccGlobalVarConfig_basic(varName, varValue string) string {
+func testAccGlobalVarConfigBasic(varName, varValue string) string {
 	return fmt.Sprintf(`
 resource "mysql_global_variable" "test" {
   name = "%s"

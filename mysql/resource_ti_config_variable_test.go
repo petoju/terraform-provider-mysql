@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -25,32 +26,32 @@ func TestPdConfigVar_basic(t *testing.T) {
 			testAccPreCheckSkipNotTiDB(t)
 			testAccPreCheckSkipRds(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccConfigVarCheckDestroy(varName, varType),
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccConfigVarCheckDestroy(varName, varType),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccConfigVarConfig_basic(varName, varValue, varType),
+				Config: testAccConfigVarConfigBasic(varName, varValue, varType),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
 				),
 			},
 			{
-				Config: testAccConfigVarConfig_withInstanceAndType(varName, varValue, varType, ""),
+				Config: testAccConfigVarConfigWithInstanceAndType(varName, varValue, varType, ""),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
 				),
 			},
 			{
-				Config: testAccConfigVarConfig_withInstanceAndType(varName, varValue, varType, varInstance),
+				Config: testAccConfigVarConfigWithInstanceAndType(varName, varValue, varType, varInstance),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
 				),
 			},
 			{
-				Config:      testAccConfigVarConfig_withInstanceAndType(varName, varValue, varType, varInstance),
+				Config:      testAccConfigVarConfigWithInstanceAndType(varName, varValue, varType, varInstance),
 				ExpectError: regexp.MustCompile("variable 'log.level' not found"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, "badType"),
@@ -58,7 +59,7 @@ func TestPdConfigVar_basic(t *testing.T) {
 				),
 			},
 			{
-				Config:      testAccConfigVarConfig_withInstanceAndType("varName", varValue, varType, varInstance),
+				Config:      testAccConfigVarConfigWithInstanceAndType("varName", varValue, varType, varInstance),
 				ExpectError: regexp.MustCompile(".*Error: bad request to:*"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
@@ -66,7 +67,7 @@ func TestPdConfigVar_basic(t *testing.T) {
 				),
 			},
 			{
-				Config:      testAccConfigVarConfig_withInstanceAndType(varName, varValue, "varType", varInstance),
+				Config:      testAccConfigVarConfigWithInstanceAndType(varName, varValue, "varType", varInstance),
 				ExpectError: regexp.MustCompile(".*Error: expected type to be one of.*"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
@@ -74,7 +75,7 @@ func TestPdConfigVar_basic(t *testing.T) {
 				),
 			},
 			{
-				Config:      testAccConfigVarConfig_withInstanceAndType(varName, "varValue'varValue", varType, varInstance),
+				Config:      testAccConfigVarConfigWithInstanceAndType(varName, "varValue'varValue", varType, varInstance),
 				ExpectError: regexp.MustCompile(".*Error: \"value\" is badly formatted.*"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
@@ -98,25 +99,25 @@ func TestTiKvConfigVar_basic(t *testing.T) {
 			testAccPreCheckSkipNotTiDB(t)
 			testAccPreCheckSkipRds(t)
 		},
-		Providers:    testAccProviders,
-		CheckDestroy: testAccConfigVarCheckDestroy(varName, varType),
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccConfigVarCheckDestroy(varName, varType),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccConfigVarConfig_basic(varName, varValue, varType),
+				Config: testAccConfigVarConfigBasic(varName, varValue, varType),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
 				),
 			},
 			{
-				Config: testAccConfigVarConfig_withInstanceAndType(varName, varValue, varType, varInstance),
+				Config: testAccConfigVarConfigWithInstanceAndType(varName, varValue, varType, varInstance),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, varValue, varType),
 					resource.TestCheckResourceAttr(resourceName, "name", varName),
 				),
 			},
 			{
-				Config:      testAccConfigVarConfig_withInstanceAndType(varName, "varValue", varType, varInstance),
+				Config:      testAccConfigVarConfigWithInstanceAndType(varName, "varValue", varType, varInstance),
 				ExpectError: regexp.MustCompile(".*Error: error setting value*"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccConfigVarExists(varName, "varValue", varType),
@@ -172,7 +173,7 @@ func getGetInstance(varType string, t *testing.T) string {
 
 	err = stmt.QueryRow(varType).Scan(&resInstanceType, &resInstance, &resName, &resValue)
 
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err.Error()
 	}
 
@@ -205,7 +206,7 @@ func testAccConfigVarCheckDestroy(varName string, varType string) resource.TestC
 	}
 }
 
-func testAccConfigVarConfig_basic(varName string, varValue string, varType string) string {
+func testAccConfigVarConfigBasic(varName string, varValue string, varType string) string {
 	return fmt.Sprintf(`
 resource "mysql_ti_config" "test" {
 		name = "%s"
@@ -215,7 +216,7 @@ resource "mysql_ti_config" "test" {
 `, varName, varValue, varType)
 }
 
-func testAccConfigVarConfig_withInstanceAndType(varName string, varValue string, varType string, varInstance string) string {
+func testAccConfigVarConfigWithInstanceAndType(varName string, varValue string, varType string, varInstance string) string {
 	return fmt.Sprintf(`
 resource "mysql_ti_config" "test" {
 		name = "%s"
