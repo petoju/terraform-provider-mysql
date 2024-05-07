@@ -143,8 +143,6 @@ See also: [Authentication at Google](https://cloud.google.com/docs/authenticatio
 
 ### Azure MySQL server with AzureAD auth enabled connection
 
-For connections to Azure MySQL server with AzureAD auth enabled, the provider connects using DefaultAzureCredential from the Azure SDK for Go.
-
 To use this authentication, add `azure://` to the  endpoint. This will lead to ignore `password` field which would be replaced by Azure AD
 token of currently obtained identity. You have to use `username` as stated in Azure documentation.
 
@@ -154,6 +152,24 @@ provider "mysql" {
   endpoint = "azure://your-azure-instance-name.mysql.database.azure.com"
   username = "username@yourtenant.onmicrosoft.com"
   # or if you granted access to AAD group: username = "Active_Directory_GroupName"
+}
+```
+
+By default the provider will connect using DefaultAzureCredential from the Azure SDK for Go. The credentials can be provided by setting the `AZURE_*` environment variables, using a workload identity or a managed identity present on the host.
+
+You can also further configure the Azure connection using the `azure_config` block:
+
+```hcl
+# Configure the MySQL provider for Azure Mysql Server with specific credentials
+provider "mysql" {
+  endpoint = "azure://your-azure-instance-name.mysql.database.azure.com"
+  username = "username@yourtenant.onmicrosoft.com"
+
+  azure_config {
+    tenant_id     = "your-tenant-id"
+    client_id     = "your-client-id"
+    client_secret = var.client_secret
+  }
 }
 ```
 
@@ -187,3 +203,8 @@ The following arguments are supported:
 * `authentication_plugin` - (Optional) Sets the authentication plugin, it can be one of the following: `native` or `cleartext`. Defaults to `native`.
 * `iam_database_authentication` - (Optional) For Cloud SQL databases, it enabled the use of IAM authentication. Make sure to declare the `password` field with a temporary OAuth2 token of the user that will connect to the MySQL server.
 * `private_ip` - (Optional) Whether to use a connection to an instance with a private ip. Defaults to `false`. This argument only applies to CloudSQL and is ignored elsewhere.
+* `azure_config` - (Optional) Sets the Azure configuration for the connection. This is a block containing the following arguments:
+  * `client_id` - (Optional) The client ID for the Azure AD application. Can also be sourced from the `AZURE_CLIENT_ID` or `ARM_CLIENT_ID` environment variables.
+  * `client_secret` - (Optional) The client secret for the Azure AD application. Can also be sourced from the `AZURE_CLIENT_SECRET` or `ARM_CLIENT_SECRET` environment variables.
+  * `tenant_id` - (Optional) The tenant ID for the Azure AD application. Can also be sourced from the `AZURE_TENANT_ID` or `ARM_TENANT_ID` environment variables.
+  * `environment` - (Optional) The Azure environment to use. Can also be sourced from the `AZURE_ENVIRONMENT` or `ARM_ENVIRONMENT` environment variables. Possible values are `public`, `china`, `german`, `usgovernment`. Defaults to `public`.

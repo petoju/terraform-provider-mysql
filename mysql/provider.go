@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"log"
 	"net"
 	"net/url"
@@ -20,6 +19,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
@@ -28,6 +28,7 @@ import (
 
 	cloudsqlconn "cloud.google.com/go/cloudsqlconn"
 	cloudsql "cloud.google.com/go/cloudsqlconn/mysql/mysql"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 )
@@ -37,6 +38,10 @@ const (
 	nativePasswords     = "native"
 	userNotFoundErrCode = 1133
 	unknownUserErrCode  = 1396
+	azEnvPublic         = "public"
+	azEnvChina          = "china"
+	azEnvGerman         = "german"
+	azEnvUSGovernment   = "usgovernment"
 )
 
 type OneConnection struct {
@@ -106,7 +111,7 @@ func Provider() *schema.Provider {
 					"ALL_PROXY",
 					"all_proxy",
 				}, nil),
-				ValidateFunc: validation.StringMatch(regexp.MustCompile("^socks5h?://.*:\\d+$"), "The proxy URL is not a valid socks url."),
+				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^socks5h?://.*:\d+$`), "The proxy URL is not a valid socks url."),
 			},
 
 			"tls": {
@@ -185,6 +190,53 @@ func Provider() *schema.Provider {
 				Type:     schema.TypeBool,
 				Optional: true,
 				Default:  false,
+			},
+			"azure_config": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Default:  nil,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"tenant_id": {
+							Type:     schema.TypeString,
+							Optional: true,
+							DefaultFunc: schema.MultiEnvDefaultFunc([]string{
+								"AZURE_TENANT_ID",
+								"ARM_TENANT_ID",
+							}, nil),
+						},
+						"client_id": {
+							Type:     schema.TypeString,
+							Optional: true,
+							DefaultFunc: schema.MultiEnvDefaultFunc([]string{
+								"AZURE_CLIENT_ID",
+								"ARM_CLIENT_ID",
+							}, nil),
+						},
+						"client_secret": {
+							Type:     schema.TypeString,
+							Optional: true,
+							DefaultFunc: schema.MultiEnvDefaultFunc([]string{
+								"AZURE_CLIENT_SECRET",
+								"ARM_CLIENT_SECRET",
+							}, nil),
+						},
+						"environment": {
+							Type:     schema.TypeString,
+							Optional: true,
+							ValidateFunc: validation.StringInSlice([]string{
+								azEnvPublic,
+								azEnvChina,
+								azEnvGerman,
+								azEnvUSGovernment,
+							}, false),
+							DefaultFunc: schema.MultiEnvDefaultFunc([]string{
+								"AZURE_ENVIRONMENT",
+								"ARM_ENVIRONMENT",
+							}, nil),
+						},
+					},
+				},
 			},
 		},
 
@@ -303,18 +355,56 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 
 	} else if strings.HasPrefix(endpoint, "azure://") {
+		var azCredential azcore.TokenCredential
+		var azTenantId, azClientId, azClientSecret, azEnvironment string
+		var err error
+
+		azEnvironment = os.Getenv("AZURE_ENVIRONMENT")
+		if azEnvironment == "" {
+			azEnvironment = os.Getenv("ARM_ENVIRONMENT")
+		}
+
+		azAuthList := d.Get("azure_config").([]interface{})
+		if len(azAuthList) > 0 {
+			azAuthMap := azAuthList[0].(map[string]interface{})
+			if azAuthMap["tenant_id"] != nil {
+				azTenantId = azAuthMap["tenant_id"].(string)
+			}
+			if azAuthMap["client_id"] != nil {
+				azClientId = azAuthMap["client_id"].(string)
+			}
+			if azAuthMap["client_secret"] != nil {
+				azClientSecret = azAuthMap["client_secret"].(string)
+			}
+			if azAuthMap["environment"] != nil {
+				azEnvironment = azAuthMap["environment"].(string)
+			}
+		}
+
+		if azTenantId != "" && azClientId != "" && azClientSecret != "" {
+			log.Printf("[DEBUG] Using Azure Client Secret Credentials: client_id = %s, tenant_id = %s", azClientId, azTenantId)
+			azCredential, err = azidentity.NewClientSecretCredential(azTenantId, azClientId, azClientSecret, nil)
+		} else {
+			log.Printf("[DEBUG] Using Azure Default Credentials")
+			azCredential, err = azidentity.NewDefaultAzureCredential(nil)
+		}
 		// Azure AD does not support native password authentication but go-sql-driver/mysql
 		// has to be configured only with ?allowClearTextPasswords=true not with allowNativePasswords=false in this case
 		allowClearTextPasswords = true
-		azCredential, err := azidentity.NewDefaultAzureCredential(nil)
 		endpoint = strings.ReplaceAll(endpoint, "azure://", "")
-		azScope := "https://ossrdbms-aad.database.windows.net"
-		if os.Getenv("ARM_ENVIRONMENT") == "china" {
+
+		var azScope string
+		switch azEnvironment {
+		case azEnvChina:
 			azScope = "https://ossrdbms-aad.database.chinacloudapi.cn"
-		} else if os.Getenv("ARM_ENVIRONMENT") == "german" {
+		case azEnvGerman:
 			azScope = "https://ossrdbms-aad.database.chinacloudapi.de"
-		} else if os.Getenv("ARM_ENVIRONMENT") == "usgovernment" {
+		case azEnvUSGovernment:
 			azScope = "https://ossrdbms-aad.database.usgovcloudapi.net"
+		case azEnvPublic:
+			fallthrough
+		default:
+			azScope = "https://ossrdbms-aad.database.windows.net"
 		}
 
 		if err != nil {
@@ -327,7 +417,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		)
 
 		if err != nil {
-			return nil, diag.Errorf("failed to get token from Azure AD %v", err)
+			return nil, diag.Errorf("failed to get token from Azure AD: %v", err)
 		}
 
 		password = azToken.Token
