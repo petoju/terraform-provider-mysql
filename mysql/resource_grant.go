@@ -1078,7 +1078,7 @@ func normalizeColumnOrder(perm string) string {
 	return fmt.Sprintf("%s(%s)", precursor, partsTogether)
 }
 
-var kReAllPrivileges = regexp.MustCompile(`ALL ?(PRIVILEGES)?`)
+var kReAllPrivileges = regexp.MustCompile(`\bALL ?(PRIVILEGES)?\b`)
 
 func normalizePerms(perms []string) []string {
 	ret := []string{}

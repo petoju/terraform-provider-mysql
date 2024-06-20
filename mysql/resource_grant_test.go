@@ -317,7 +317,9 @@ func TestAccGrantComplexMySQL8(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testAccPrivilege("mysql_grant.test", "SHOW DATABASES", true, false),
 					testAccPrivilege("mysql_grant.test", "CONNECTION_ADMIN", true, false),
+					testAccPrivilege("mysql_grant.test", "FIREWALL_EXEMPT", true, false),
 					testAccPrivilege("mysql_grant.test", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.test", "ALL PRIVILEGES", false, false),
 				),
 			},
 		},
@@ -616,7 +618,7 @@ resource "mysql_grant" "test" {
   host       = "${mysql_user.test.host}"
   table      = "*"
   database   = "*"
-  privileges = ["SHOW DATABASES", "CONNECTION_ADMIN", "SELECT"]
+  privileges = ["SHOW DATABASES", "CONNECTION_ADMIN", "SELECT", "FIREWALL_EXEMPT"]
 }
 
 `, dbName, dbName)
