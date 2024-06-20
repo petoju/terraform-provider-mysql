@@ -92,15 +92,14 @@ type RefreshAheadCache struct {
 	openConns uint64
 
 	connName instance.ConnName
-	logger   debug.Logger
-	key      *rsa.PrivateKey
+	logger   debug.ContextLogger
 
 	// refreshTimeout sets the maximum duration a refresh cycle can run
 	// for.
 	refreshTimeout time.Duration
 	// l controls the rate at which refresh cycles are run.
 	l *rate.Limiter
-	r refresher
+	r adminAPIClient
 
 	mu              sync.RWMutex
 	useIAMAuthNDial bool
@@ -121,7 +120,7 @@ type RefreshAheadCache struct {
 // NewRefreshAheadCache initializes a new Instance given an instance connection name
 func NewRefreshAheadCache(
 	cn instance.ConnName,
-	l debug.Logger,
+	l debug.ContextLogger,
 	client *sqladmin.Service,
 	key *rsa.PrivateKey,
 	refreshTimeout time.Duration,
@@ -133,11 +132,11 @@ func NewRefreshAheadCache(
 	i := &RefreshAheadCache{
 		connName: cn,
 		logger:   l,
-		key:      key,
 		l:        rate.NewLimiter(rate.Every(refreshInterval), refreshBurst),
-		r: newRefresher(
+		r: newAdminAPIClient(
 			l,
 			client,
+			key,
 			ts,
 			dialerID,
 		),
@@ -176,6 +175,24 @@ type ConnectionInfo struct {
 	Expiration        time.Time
 
 	addrs map[string]string
+}
+
+// NewConnectionInfo initializes a ConnectionInfo struct.
+func NewConnectionInfo(
+	cn instance.ConnName,
+	version string,
+	ipAddrs map[string]string,
+	serverCaCert *x509.Certificate,
+	clientCert tls.Certificate,
+) ConnectionInfo {
+	return ConnectionInfo{
+		addrs:             ipAddrs,
+		ServerCaCert:      serverCaCert,
+		ClientCertificate: clientCert,
+		Expiration:        clientCert.Leaf.NotAfter,
+		DBVersion:         version,
+		ConnectionName:    cn,
+	}
 }
 
 // Addr returns the IP address or DNS name for the given IP type.
@@ -366,6 +383,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		// instance has been closed, don't schedule anything
 		if err := i.ctx.Err(); err != nil {
 			i.logger.Debugf(
+				context.Background(),
 				"[%v] Instance is closed, stopping refresh operations",
 				i.connName.String(),
 			)
@@ -374,6 +392,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 			return
 		}
 		i.logger.Debugf(
+			context.Background(),
 			"[%v] Connection info refresh operation started",
 			i.connName.String(),
 		)
@@ -391,22 +410,30 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 				nil,
 			)
 		} else {
+			var useIAMAuthN bool
+			i.mu.Lock()
+			useIAMAuthN = i.useIAMAuthNDial
+			i.mu.Unlock()
 			r.result, r.err = i.r.ConnectionInfo(
-				ctx, i.connName, i.key, i.useIAMAuthNDial)
+				ctx, i.connName, useIAMAuthN,
+			)
 		}
 		switch r.err {
 		case nil:
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation complete",
 				i.connName.String(),
 			)
 			i.logger.Debugf(
+				ctx,
 				"[%v] Current certificate expiration = %v",
 				i.connName.String(),
 				r.result.Expiration.UTC().Format(time.RFC3339),
 			)
 		default:
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation failed, err = %v",
 				i.connName.String(),
 				r.err,
@@ -423,6 +450,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		// if failed, scheduled the next refresh immediately
 		if r.err != nil {
 			i.logger.Debugf(
+				ctx,
 				"[%v] Connection info refresh operation scheduled immediately",
 				i.connName.String(),
 			)
@@ -444,6 +472,7 @@ func (i *RefreshAheadCache) scheduleRefresh(d time.Duration) *refreshOperation {
 		i.cur = r
 		t := refreshDuration(time.Now(), i.cur.result.Expiration)
 		i.logger.Debugf(
+			ctx,
 			"[%v] Connection info refresh operation scheduled at %v (now + %v)",
 			i.connName.String(),
 			time.Now().Add(t).UTC().Format(time.RFC3339),

@@ -62,7 +62,12 @@ func fetchMetadata(
 	var end trace.EndSpanFunc
 	ctx, end = trace.StartSpan(ctx, "cloud.google.com/go/cloudsqlconn/internal.FetchMetadata")
 	defer func() { end(err) }()
-	db, err := client.Connect.Get(inst.Project(), inst.Name()).Context(ctx).Do()
+
+	db, err := retry50x(ctx, func(ctx2 context.Context) (*sqladmin.ConnectSettings, error) {
+		return client.Connect.Get(
+			inst.Project(), inst.Name(),
+		).Context(ctx2).Do()
+	}, exponentialBackoff)
 	if err != nil {
 		return metadata{}, errtype.NewRefreshError("failed to get instance metadata", inst.String(), err)
 	}
@@ -127,12 +132,23 @@ func fetchMetadata(
 	return m, nil
 }
 
+var expired = time.Time{}.Add(1)
+
+// canRefresh determines if the provided token was refreshed or if it still has
+// the sentinel expiration, which means the token was provided without a
+// refresh token (as with the Cloud SQL Proxy's --token flag) and therefore
+// cannot be refreshed.
+func canRefresh(t *oauth2.Token) bool {
+	return t.Expiry.Unix() != expired.Unix()
+}
+
+// refreshToken will retrieve a new token, only if a refresh token is present.
 func refreshToken(ts oauth2.TokenSource, tok *oauth2.Token) (*oauth2.Token, error) {
 	expiredToken := &oauth2.Token{
 		AccessToken:  tok.AccessToken,
 		TokenType:    tok.TokenType,
 		RefreshToken: tok.RefreshToken,
-		Expiry:       time.Time{}.Add(1), // Expired
+		Expiry:       expired,
 	}
 	return oauth2.ReuseTokenSource(expiredToken, ts).Token()
 }
@@ -181,9 +197,11 @@ func fetchEphemeralCert(
 		}
 		req.AccessToken = tok.AccessToken
 	}
-	resp, err := client.Connect.GenerateEphemeralCert(
-		inst.Project(), inst.Name(), &req,
-	).Context(ctx).Do()
+	resp, err := retry50x(ctx, func(ctx2 context.Context) (*sqladmin.GenerateEphemeralCertResponse, error) {
+		return client.Connect.GenerateEphemeralCert(
+			inst.Project(), inst.Name(), &req,
+		).Context(ctx2).Do()
+	}, exponentialBackoff)
 	if err != nil {
 		return tls.Certificate{}, errtype.NewRefreshError(
 			"create ephemeral cert failed",
@@ -210,9 +228,9 @@ func fetchEphemeralCert(
 		)
 	}
 	if ts != nil {
-		// Adjust the certificate's expiration to be the earliest of the token's
-		// expiration or the certificate's expiration.
-		if tok.Expiry.Before(clientCert.NotAfter) {
+		// Adjust the certificate's expiration to be the earliest of
+		// the token's expiration or the certificate's expiration.
+		if canRefresh(tok) && tok.Expiry.Before(clientCert.NotAfter) {
 			clientCert.NotAfter = tok.Expiry
 		}
 	}
@@ -225,36 +243,40 @@ func fetchEphemeralCert(
 	return c, nil
 }
 
-// newRefresher creates a Refresher.
-func newRefresher(
-	l debug.Logger,
+// newAdminAPIClient creates a Refresher.
+func newAdminAPIClient(
+	l debug.ContextLogger,
 	svc *sqladmin.Service,
+	key *rsa.PrivateKey,
 	ts oauth2.TokenSource,
 	dialerID string,
-) refresher {
-	return refresher{
+) adminAPIClient {
+	return adminAPIClient{
 		dialerID: dialerID,
 		logger:   l,
+		key:      key,
 		client:   svc,
 		ts:       ts,
 	}
 }
 
-// refresher manages the SQL Admin API access to instance metadata and to
+// adminAPIClient manages the SQL Admin API access to instance metadata and to
 // ephemeral certificates.
-type refresher struct {
+type adminAPIClient struct {
 	// dialerID is the unique ID of the associated dialer.
 	dialerID string
-	logger   debug.Logger
-	client   *sqladmin.Service
+	logger   debug.ContextLogger
+	// key is used to generate the client certificate
+	key    *rsa.PrivateKey
+	client *sqladmin.Service
 	// ts is the TokenSource used for IAM DB AuthN.
 	ts oauth2.TokenSource
 }
 
 // ConnectionInfo immediately performs a full refresh operation using the Cloud
 // SQL Admin API.
-func (r refresher) ConnectionInfo(
-	ctx context.Context, cn instance.ConnName, k *rsa.PrivateKey, iamAuthNDial bool,
+func (c adminAPIClient) ConnectionInfo(
+	ctx context.Context, cn instance.ConnName, iamAuthNDial bool,
 ) (ci ConnectionInfo, err error) {
 
 	var refreshEnd trace.EndSpanFunc
@@ -262,7 +284,7 @@ func (r refresher) ConnectionInfo(
 		trace.AddInstanceName(cn.String()),
 	)
 	defer func() {
-		go trace.RecordRefreshResult(context.Background(), cn.String(), r.dialerID, err)
+		go trace.RecordRefreshResult(context.Background(), cn.String(), c.dialerID, err)
 		refreshEnd(err)
 	}()
 
@@ -274,7 +296,7 @@ func (r refresher) ConnectionInfo(
 	mdC := make(chan mdRes, 1)
 	go func() {
 		defer close(mdC)
-		md, err := fetchMetadata(ctx, r.client, cn)
+		md, err := fetchMetadata(ctx, c.client, cn)
 		mdC <- mdRes{md, err}
 	}()
 
@@ -288,9 +310,9 @@ func (r refresher) ConnectionInfo(
 		defer close(ecC)
 		var iamTS oauth2.TokenSource
 		if iamAuthNDial {
-			iamTS = r.ts
+			iamTS = c.ts
 		}
-		ec, err := fetchEphemeralCert(ctx, r.client, cn, k, iamTS)
+		ec, err := fetchEphemeralCert(ctx, c.client, cn, c.key, iamTS)
 		ecC <- ecRes{ec, err}
 	}()
 
@@ -322,14 +344,9 @@ func (r refresher) ConnectionInfo(
 		return ConnectionInfo{}, fmt.Errorf("refresh failed: %w", ctx.Err())
 	}
 
-	return ConnectionInfo{
-		addrs:             md.ipAddrs,
-		ServerCaCert:      md.serverCaCert,
-		ClientCertificate: ec,
-		Expiration:        ec.Leaf.NotAfter,
-		DBVersion:         md.version,
-		ConnectionName:    cn,
-	}, nil
+	return NewConnectionInfo(
+		cn, md.version, md.ipAddrs, md.serverCaCert, ec,
+	), nil
 }
 
 // supportsAutoIAMAuthN checks that the engine support automatic IAM authn. If

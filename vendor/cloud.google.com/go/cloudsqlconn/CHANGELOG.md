@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.11.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.10.1...v1.11.0) (2024-06-12)
+
+
+### Features
+
+* generate RSA key lazily for lazy refresh ([#826](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/826)) ([bf293e2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/bf293e25e2d52f395734c597c86dfe85ede5f4cd)), closes [#823](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/823)
+* invalidate cache on failed IP lookup ([#812](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/812)) ([4b68de3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4b68de3693e25642acd847d0c8ac393982d00c9b)), closes [#780](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/780)
+
+
+### Bug Fixes
+
+* ensure connection count is correctly reported ([#824](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/824)) ([b286049](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/b286049a7ade2a9e3cf44ea36f56946cfa58f60a))
+* invalidate cache on failed `Warmup` and `EngineVersion` ([#827](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/827)) ([c3915a6](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/c3915a6790f3d4e3cff266a0d8c506a09ecf9634))
+
+## [1.10.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.10.0...v1.10.1) (2024-05-22)
+
+
+### Bug Fixes
+
+* remove duplicate refresh operations ([#806](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/806)) ([beb3605](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/beb36052af2221d7ff238edc4c98c733cac2999d)), closes [#771](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/771)
+
+## [1.10.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.9.0...v1.10.0) (2024-05-14)
+
+
+### Features
+
+* expose context to debug logger ([#797](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/797)) ([847f7c1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/847f7c10cc796761e81a86e0551f00832a5056d5))
+
+
+### Bug Fixes
+
+* retry 50x errors with exponential backoff ([#781](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/781)) ([40dc789](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/40dc789baabbe40cebabee7a287222940b120e6a))
+
 ## [1.9.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.8.1...v1.9.0) (2024-04-16)
 
 

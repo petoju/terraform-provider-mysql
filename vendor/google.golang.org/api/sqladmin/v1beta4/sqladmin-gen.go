@@ -97,7 +97,6 @@ const apiVersion = "v1beta4"
 const basePath = "https://sqladmin.googleapis.com/"
 const basePathTemplate = "https://sqladmin.UNIVERSE_DOMAIN/"
 const mtlsBasePath = "https://sqladmin.mtls.googleapis.com/"
-const defaultUniverseDomain = "googleapis.com"
 
 // OAuth2 scopes used by this API.
 const (
@@ -120,7 +119,7 @@ func NewService(ctx context.Context, opts ...option.ClientOption) (*Service, err
 	opts = append(opts, internaloption.WithDefaultEndpoint(basePath))
 	opts = append(opts, internaloption.WithDefaultEndpointTemplate(basePathTemplate))
 	opts = append(opts, internaloption.WithDefaultMTLSEndpoint(mtlsBasePath))
-	opts = append(opts, internaloption.WithDefaultUniverseDomain(defaultUniverseDomain))
+	opts = append(opts, internaloption.EnableNewAuthLibrary())
 	client, endpoint, err := htransport.NewClient(ctx, opts...)
 	if err != nil {
 		return nil, err
@@ -415,6 +414,34 @@ func (s *ApiWarning) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(*s), s.ForceSendFields, s.NullFields)
 }
 
+// AvailableDatabaseVersion: An available database version. It can be a major
+// or a minor version.
+type AvailableDatabaseVersion struct {
+	// DisplayName: The database version's display name.
+	DisplayName string `json:"displayName,omitempty"`
+	// MajorVersion: The version's major version name.
+	MajorVersion string `json:"majorVersion,omitempty"`
+	// Name: The database version name. For MySQL 8.0, this string provides the
+	// database major and minor version.
+	Name string `json:"name,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "DisplayName") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "DisplayName") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s *AvailableDatabaseVersion) MarshalJSON() ([]byte, error) {
+	type NoMethod AvailableDatabaseVersion
+	return gensupport.MarshalJSON(NoMethod(*s), s.ForceSendFields, s.NullFields)
+}
+
 // BackupConfiguration: Database instance backup configuration.
 type BackupConfiguration struct {
 	// BackupRetentionSettings: Backup retention settings.
@@ -443,13 +470,16 @@ type BackupConfiguration struct {
 	//
 	// Possible values:
 	//   "TRANSACTIONAL_LOG_STORAGE_STATE_UNSPECIFIED" - Unspecified.
-	//   "DISK" - The transaction logs for the instance are stored on a data disk.
-	//   "SWITCHING_TO_CLOUD_STORAGE" - The transaction logs for the instance are
-	// switching from being stored on a data disk to being stored in Cloud Storage.
-	//   "SWITCHED_TO_CLOUD_STORAGE" - The transaction logs for the instance are
-	// now stored in Cloud Storage. Previously, they were stored on a data disk.
-	//   "CLOUD_STORAGE" - The transaction logs for the instance are stored in
-	// Cloud Storage.
+	//   "DISK" - The transaction logs used for PITR for the instance are stored on
+	// a data disk.
+	//   "SWITCHING_TO_CLOUD_STORAGE" - The transaction logs used for PITR for the
+	// instance are switching from being stored on a data disk to being stored in
+	// Cloud Storage. Only applicable to MySQL.
+	//   "SWITCHED_TO_CLOUD_STORAGE" - The transaction logs used for PITR for the
+	// instance are now stored in Cloud Storage. Previously, they were stored on a
+	// data disk. Only applicable to MySQL.
+	//   "CLOUD_STORAGE" - The transaction logs used for PITR for the instance are
+	// stored in Cloud Storage. Only applicable to MySQL and PostgreSQL.
 	TransactionalLogStorageState string `json:"transactionalLogStorageState,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "BackupRetentionSettings") to
 	// unconditionally include in API requests. By default, fields with empty or
@@ -736,9 +766,14 @@ type CloneContext struct {
 	// PointInTime: Timestamp, if specified, identifies the time to which the
 	// source instance is cloned.
 	PointInTime string `json:"pointInTime,omitempty"`
-	// PreferredZone: Optional. (Point-in-time recovery for PostgreSQL only) Clone
-	// to an instance in the specified zone. If no zone is specified, clone to the
-	// same zone as the source instance.
+	// PreferredSecondaryZone: Optional. Copy clone and point-in-time recovery
+	// clone of a regional instance in the specified zones. If not specified, clone
+	// to the same secondary zone as the source instance. This value cannot be the
+	// same as the preferred_zone field.
+	PreferredSecondaryZone string `json:"preferredSecondaryZone,omitempty"`
+	// PreferredZone: Optional. Copy clone and point-in-time recovery clone of an
+	// instance to the specified zone. If no zone is specified, clone to the same
+	// primary zone as the source instance.
 	PreferredZone string `json:"preferredZone,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "AllocatedIpRange") to
 	// unconditionally include in API requests. By default, fields with empty or
@@ -802,6 +837,7 @@ type ConnectSettings struct {
 	//   "POSTGRES_13" - The database version is PostgreSQL 13.
 	//   "POSTGRES_14" - The database version is PostgreSQL 14.
 	//   "POSTGRES_15" - The database version is PostgreSQL 15.
+	//   "POSTGRES_16" - The database version is PostgreSQL 16.
 	//   "MYSQL_8_0" - The database version is MySQL 8.
 	//   "MYSQL_8_0_18" - The database major version is MySQL 8.0 and the minor
 	// version is 18.
@@ -835,6 +871,9 @@ type ConnectSettings struct {
 	// version is 39.
 	//   "MYSQL_8_0_40" - The database major version is MySQL 8.0 and the minor
 	// version is 40.
+	//   "MYSQL_8_4" - The database version is MySQL 8.4.
+	//   "MYSQL_8_4_0" - The database version is MySQL 8.4 and the patch version is
+	// 0.
 	//   "SQLSERVER_2019_STANDARD" - The database version is SQL Server 2019
 	// Standard.
 	//   "SQLSERVER_2019_ENTERPRISE" - The database version is SQL Server 2019
@@ -1037,6 +1076,7 @@ type DatabaseInstance struct {
 	//   "POSTGRES_13" - The database version is PostgreSQL 13.
 	//   "POSTGRES_14" - The database version is PostgreSQL 14.
 	//   "POSTGRES_15" - The database version is PostgreSQL 15.
+	//   "POSTGRES_16" - The database version is PostgreSQL 16.
 	//   "MYSQL_8_0" - The database version is MySQL 8.
 	//   "MYSQL_8_0_18" - The database major version is MySQL 8.0 and the minor
 	// version is 18.
@@ -1070,6 +1110,9 @@ type DatabaseInstance struct {
 	// version is 39.
 	//   "MYSQL_8_0_40" - The database major version is MySQL 8.0 and the minor
 	// version is 40.
+	//   "MYSQL_8_4" - The database version is MySQL 8.4.
+	//   "MYSQL_8_4_0" - The database version is MySQL 8.4 and the patch version is
+	// 0.
 	//   "SQLSERVER_2019_STANDARD" - The database version is SQL Server 2019
 	// Standard.
 	//   "SQLSERVER_2019_ENTERPRISE" - The database version is SQL Server 2019
@@ -1156,15 +1199,16 @@ type DatabaseInstance struct {
 	ReplicaConfiguration *ReplicaConfiguration `json:"replicaConfiguration,omitempty"`
 	// ReplicaNames: The replicas of the instance.
 	ReplicaNames []string `json:"replicaNames,omitempty"`
-	// ReplicationCluster: The pair of a primary instance and disaster recovery
-	// (DR) replica. A DR replica is a cross-region replica that you designate for
-	// failover in the event that the primary instance has regional failure.
+	// ReplicationCluster: A primary instance and disaster recovery (DR) replica
+	// pair. A DR replica is a cross-region replica that you designate for failover
+	// in the event that the primary instance experiences regional failure. Only
+	// applicable to MySQL.
 	ReplicationCluster *ReplicationCluster `json:"replicationCluster,omitempty"`
 	// RootPassword: Initial root password. Use only on creation. You must set root
 	// passwords before you can connect to PostgreSQL instances.
 	RootPassword string `json:"rootPassword,omitempty"`
-	// SatisfiesPzs: The status indicating if instance satisfiesPzs. Reserved for
-	// future use.
+	// SatisfiesPzs: This status indicates whether the instance satisfies PZS. The
+	// status is reserved for future use.
 	SatisfiesPzs bool `json:"satisfiesPzs,omitempty"`
 	// ScheduledMaintenance: The start time of any upcoming scheduled maintenance
 	// for this instance.
@@ -1221,6 +1265,9 @@ type DatabaseInstance struct {
 	//   "KMS_KEY_ISSUE" - The KMS key used by the instance is either revoked or
 	// denied access to
 	SuspensionReason []string `json:"suspensionReason,omitempty"`
+	// UpgradableDatabaseVersions: Output only. All database versions that are
+	// available for upgrade.
+	UpgradableDatabaseVersions []*AvailableDatabaseVersion `json:"upgradableDatabaseVersions,omitempty"`
 	// WriteEndpoint: Output only. The dns name of the primary instance in a
 	// replication group.
 	WriteEndpoint string `json:"writeEndpoint,omitempty"`
@@ -1773,6 +1820,7 @@ type Flag struct {
 	//   "POSTGRES_13" - The database version is PostgreSQL 13.
 	//   "POSTGRES_14" - The database version is PostgreSQL 14.
 	//   "POSTGRES_15" - The database version is PostgreSQL 15.
+	//   "POSTGRES_16" - The database version is PostgreSQL 16.
 	//   "MYSQL_8_0" - The database version is MySQL 8.
 	//   "MYSQL_8_0_18" - The database major version is MySQL 8.0 and the minor
 	// version is 18.
@@ -1806,6 +1854,9 @@ type Flag struct {
 	// version is 39.
 	//   "MYSQL_8_0_40" - The database major version is MySQL 8.0 and the minor
 	// version is 40.
+	//   "MYSQL_8_4" - The database version is MySQL 8.4.
+	//   "MYSQL_8_4_0" - The database version is MySQL 8.4 and the patch version is
+	// 0.
 	//   "SQLSERVER_2019_STANDARD" - The database version is SQL Server 2019
 	// Standard.
 	//   "SQLSERVER_2019_ENTERPRISE" - The database version is SQL Server 2019
@@ -1896,19 +1947,22 @@ func (s *FlagsListResponse) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(*s), s.ForceSendFields, s.NullFields)
 }
 
-// GeminiInstanceConfig: Gemini configuration.
+// GeminiInstanceConfig: Gemini instance configuration.
 type GeminiInstanceConfig struct {
-	// ActiveQueryEnabled: Output only. Whether active query is enabled.
+	// ActiveQueryEnabled: Output only. Whether the active query is enabled.
 	ActiveQueryEnabled bool `json:"activeQueryEnabled,omitempty"`
 	// Entitled: Output only. Whether Gemini is enabled.
 	Entitled bool `json:"entitled,omitempty"`
-	// FlagRecommenderEnabled: Output only. Whether flag recommender is enabled.
+	// FlagRecommenderEnabled: Output only. Whether the flag recommender is
+	// enabled.
 	FlagRecommenderEnabled bool `json:"flagRecommenderEnabled,omitempty"`
-	// GoogleVacuumMgmtEnabled: Output only. Whether vacuum management is enabled.
+	// GoogleVacuumMgmtEnabled: Output only. Whether the vacuum management is
+	// enabled.
 	GoogleVacuumMgmtEnabled bool `json:"googleVacuumMgmtEnabled,omitempty"`
-	// IndexAdvisorEnabled: Output only. Whether index advisor is enabled.
+	// IndexAdvisorEnabled: Output only. Whether the index advisor is enabled.
 	IndexAdvisorEnabled bool `json:"indexAdvisorEnabled,omitempty"`
-	// OomSessionCancelEnabled: Output only. Whether oom session cancel is enabled.
+	// OomSessionCancelEnabled: Output only. Whether canceling the out-of-memory
+	// (OOM) session is enabled.
 	OomSessionCancelEnabled bool `json:"oomSessionCancelEnabled,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "ActiveQueryEnabled") to
 	// unconditionally include in API requests. By default, fields with empty or
@@ -2591,22 +2645,24 @@ type IpConfiguration struct {
 	// `ssl_mode=TRUSTED_CLIENT_CERTIFICATE_REQUIRED` and `require_ssl=true` For
 	// SQL Server: * `ssl_mode=ALLOW_UNENCRYPTED_AND_ENCRYPTED` and
 	// `require_ssl=false` * `ssl_mode=ENCRYPTED_ONLY` and `require_ssl=true` The
-	// value of `ssl_mode` gets priority over the value of `require_ssl`. For
-	// example, for the pair `ssl_mode=ENCRYPTED_ONLY` and `require_ssl=false`, the
-	// `ssl_mode=ENCRYPTED_ONLY` means only accept SSL connections, while the
-	// `require_ssl=false` means accept both non-SSL and SSL connections. MySQL and
-	// PostgreSQL databases respect `ssl_mode` in this case and accept only SSL
+	// value of `ssl_mode` has priority over the value of `require_ssl`. For
+	// example, for the pair `ssl_mode=ENCRYPTED_ONLY` and `require_ssl=false`,
+	// `ssl_mode=ENCRYPTED_ONLY` means accept only SSL connections, while
+	// `require_ssl=false` means accept both non-SSL and SSL connections. In this
+	// case, MySQL and PostgreSQL databases respect `ssl_mode` and accepts only SSL
 	// connections.
 	//
 	// Possible values:
 	//   "SSL_MODE_UNSPECIFIED" - The SSL mode is unknown.
 	//   "ALLOW_UNENCRYPTED_AND_ENCRYPTED" - Allow non-SSL/non-TLS and SSL/TLS
-	// connections. For SSL/TLS connections, the client certificate won't be
-	// verified. When this value is used, the legacy `require_ssl` flag must be
-	// false or cleared to avoid the conflict between values of two flags.
-	//   "ENCRYPTED_ONLY" - Only allow connections encrypted with SSL/TLS. When
-	// this value is used, the legacy `require_ssl` flag must be false or cleared
-	// to avoid the conflict between values of two flags.
+	// connections. For SSL connections to MySQL and PostgreSQL, the client
+	// certificate isn't verified. When this value is used, the legacy
+	// `require_ssl` flag must be false or cleared to avoid a conflict between the
+	// values of the two flags.
+	//   "ENCRYPTED_ONLY" - Only allow connections encrypted with SSL/TLS. For SSL
+	// connections to MySQL and PostgreSQL, the client certificate isn't verified.
+	// When this value is used, the legacy `require_ssl` flag must be false or
+	// cleared to avoid a conflict between the values of the two flags.
 	//   "TRUSTED_CLIENT_CERTIFICATE_REQUIRED" - Only allow connections encrypted
 	// with SSL/TLS and with valid client certificates. When this value is used,
 	// the legacy `require_ssl` flag must be true or cleared to avoid the conflict
@@ -2615,8 +2671,8 @@ type IpConfiguration struct {
 	// Proxy](https://cloud.google.com/sql/docs/postgres/connect-auth-proxy) or
 	// [Cloud SQL
 	// Connectors](https://cloud.google.com/sql/docs/postgres/connect-connectors)
-	// to enforce client identity verification. This value is not applicable to SQL
-	// Server.
+	// to enforce client identity verification. Only applicable to MySQL and
+	// PostgreSQL. Not applicable to SQL Server.
 	SslMode string `json:"sslMode,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "AllocatedIpRange") to
 	// unconditionally include in API requests. By default, fields with empty or
@@ -2958,7 +3014,8 @@ type Operation struct {
 	//   "AUTO_RESTART" - Performs auto-restart of an HA-enabled Cloud SQL database
 	// for auto recovery.
 	//   "REENCRYPT" - Re-encrypts CMEK instances with latest key version.
-	//   "SWITCHOVER" - Switches over to replica instance from primary.
+	//   "SWITCHOVER" - Switches the roles of the primary and replica pair. The
+	// target instance should be the replica.
 	//   "ACQUIRE_SSRS_LEASE" - Acquire a lease for the setup of SQL Server
 	// Reporting Services (SSRS).
 	//   "RELEASE_SSRS_LEASE" - Release a lease for the setup of SQL Server
@@ -2967,6 +3024,18 @@ type Operation struct {
 	// replica operation. Effect of a promote operation to the old primary is
 	// executed in this operation, asynchronously from the promote replica
 	// operation executed to the replica.
+	//   "CLUSTER_MAINTENANCE" - Indicates that the instance, its read replicas,
+	// and its cascading replicas are in maintenance. Maintenance typically gets
+	// initiated on groups of replicas first, followed by the primary instance. For
+	// each instance, maintenance typically causes the instance to be unavailable
+	// for 1-3 minutes.
+	//   "SELF_SERVICE_MAINTENANCE" - Indicates that the instance (and any of its
+	// replicas) are currently in maintenance. This is initiated as a self-service
+	// request by using SSM. Maintenance typically causes the instance to be
+	// unavailable for 1-3 minutes.
+	//   "SWITCHOVER_TO_REPLICA" - Switches a primary instance to a replica. This
+	// operation runs as part of a switchover operation to the original primary
+	// instance.
 	OperationType string `json:"operationType,omitempty"`
 	// SelfLink: The URI of this resource.
 	SelfLink string `json:"selfLink,omitempty"`
@@ -3288,18 +3357,31 @@ func (s *ReplicaConfiguration) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(*s), s.ForceSendFields, s.NullFields)
 }
 
-// ReplicationCluster: Primary-DR replica pair
+// ReplicationCluster: A primary instance and disaster recovery (DR) replica
+// pair. A DR replica is a cross-region replica that you designate for failover
+// in the event that the primary instance has regional failure. Only applicable
+// to MySQL.
 type ReplicationCluster struct {
-	// DrReplica: Output only. read-only field that indicates if the replica is a
-	// dr_replica; not set for a primary.
+	// DrReplica: Output only. Read-only field that indicates whether the replica
+	// is a DR replica. This field is not set if the instance is a primary
+	// instance.
 	DrReplica bool `json:"drReplica,omitempty"`
 	// FailoverDrReplicaName: Optional. If the instance is a primary instance, then
 	// this field identifies the disaster recovery (DR) replica. A DR replica is an
 	// optional configuration for Enterprise Plus edition instances. If the
-	// instance is a read replica, then the field is not set. Users can set this
-	// field to set a designated DR replica for a primary. Removing this field
-	// removes the DR replica.
+	// instance is a read replica, then the field is not set. Set this field to a
+	// replica name to designate a DR replica for a primary instance. Remove the
+	// replica name to remove the DR replica designation.
 	FailoverDrReplicaName string `json:"failoverDrReplicaName,omitempty"`
+	// PsaWriteEndpoint: Output only. If set, it indicates this instance has a
+	// private service access (PSA) dns endpoint that is pointing to the primary
+	// instance of the cluster. If this instance is the primary, the dns should be
+	// pointing to this instance. After Switchover or Replica failover, this DNS
+	// endpoint points to the promoted instance. This is a read-only field,
+	// returned to the user as information. This field can exist even if a
+	// standalone instance does not yet have a replica, or had a DR replica that
+	// was deleted.
+	PsaWriteEndpoint string `json:"psaWriteEndpoint,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "DrReplica") to
 	// unconditionally include in API requests. By default, fields with empty or
 	// default values are omitted from API requests. See
@@ -3422,8 +3504,8 @@ type Settings struct {
 	// ActiveDirectoryConfig: Active Directory configuration, relevant only for
 	// Cloud SQL for SQL Server.
 	ActiveDirectoryConfig *SqlActiveDirectoryConfig `json:"activeDirectoryConfig,omitempty"`
-	// AdvancedMachineFeatures: Specifies advance machine configuration for the
-	// instance relevant only for SQL Server.
+	// AdvancedMachineFeatures: Specifies advanced machine configuration for the
+	// instances relevant only for SQL Server.
 	AdvancedMachineFeatures *AdvancedMachineFeatures `json:"advancedMachineFeatures,omitempty"`
 	// AuthorizedGaeApplications: The App Engine app IDs that can access this
 	// instance. (Deprecated) Applied to First Generation instances only.
@@ -3711,6 +3793,13 @@ type SqlExternalSyncSettingError struct {
 	//   "INSUFFICIENT_MACHINE_TIER" - The data size of the source instance is
 	// greater than 1 TB, the number of cores of the replica instance is less than
 	// 8, and the memory of the replica is less than 32 GB.
+	//   "UNSUPPORTED_EXTENSIONS_NOT_MIGRATED" - The warning message indicates the
+	// unsupported extensions will not be migrated to the destination.
+	//   "EXTENSIONS_NOT_MIGRATED" - The warning message indicates the pg_cron
+	// extension and settings will not be migrated to the destination.
+	//   "PG_CRON_FLAG_ENABLED_IN_REPLICA" - The error message indicates that
+	// pg_cron flags are enabled on the destination which is not supported during
+	// the migration.
 	Type string `json:"type,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "Detail") to unconditionally
 	// include in API requests. By default, fields with empty or default values are
@@ -3869,14 +3958,16 @@ type SqlInstancesResetReplicaSizeRequest struct {
 }
 
 type SqlInstancesStartExternalSyncRequest struct {
-	// MigrationType: Optional. MigrationType decides if the migration is a
-	// physical file based migration or logical migration.
+	// MigrationType: Optional. MigrationType configures the migration to use
+	// physical files or logical dump files. If not set, then the logical dump file
+	// configuration is used. Valid values are `LOGICAL` or `PHYSICAL`. Only
+	// applicable to MySQL.
 	//
 	// Possible values:
-	//   "MIGRATION_TYPE_UNSPECIFIED" - If no migration type is specified it will
-	// be defaulted to LOGICAL.
-	//   "LOGICAL" - Logical Migrations
-	//   "PHYSICAL" - Physical file based Migrations
+	//   "MIGRATION_TYPE_UNSPECIFIED" - Default value is a logical dump file-based
+	// migration
+	//   "LOGICAL" - Logical dump file-based migration
+	//   "PHYSICAL" - Physical file-based migration
 	MigrationType string `json:"migrationType,omitempty"`
 	// MysqlSyncConfig: MySQL-specific settings for start external sync.
 	MysqlSyncConfig *MySqlSyncConfig `json:"mysqlSyncConfig,omitempty"`
@@ -3921,14 +4012,16 @@ func (s *SqlInstancesStartExternalSyncRequest) MarshalJSON() ([]byte, error) {
 }
 
 type SqlInstancesVerifyExternalSyncSettingsRequest struct {
-	// MigrationType: Optional. MigrationType field decides if the migration is a
-	// physical file based migration or logical migration
+	// MigrationType: Optional. MigrationType configures the migration to use
+	// physical files or logical dump files. If not set, then the logical dump file
+	// configuration is used. Valid values are `LOGICAL` or `PHYSICAL`. Only
+	// applicable to MySQL.
 	//
 	// Possible values:
-	//   "MIGRATION_TYPE_UNSPECIFIED" - If no migration type is specified it will
-	// be defaulted to LOGICAL.
-	//   "LOGICAL" - Logical Migrations
-	//   "PHYSICAL" - Physical file based Migrations
+	//   "MIGRATION_TYPE_UNSPECIFIED" - Default value is a logical dump file-based
+	// migration
+	//   "LOGICAL" - Logical dump file-based migration
+	//   "PHYSICAL" - Physical file-based migration
 	MigrationType string `json:"migrationType,omitempty"`
 	// MysqlSyncConfig: Optional. MySQL-specific settings for start external sync.
 	MysqlSyncConfig *MySqlSyncConfig `json:"mysqlSyncConfig,omitempty"`
@@ -3942,8 +4035,8 @@ type SqlInstancesVerifyExternalSyncSettingsRequest struct {
 	//   "OFFLINE" - Offline external sync only dumps and loads a one-time snapshot
 	// of the primary instance's data
 	SyncMode string `json:"syncMode,omitempty"`
-	// SyncParallelLevel: Optional. Parallel level for initial data sync. Currently
-	// only applicable for PostgreSQL.
+	// SyncParallelLevel: Optional. Parallel level for initial data sync. Only
+	// applicable for PostgreSQL.
 	//
 	// Possible values:
 	//   "EXTERNAL_SYNC_PARALLEL_LEVEL_UNSPECIFIED" - Unknown sync parallel level.
@@ -7602,8 +7695,9 @@ type InstancesPromoteReplicaCall struct {
 	header_    http.Header
 }
 
-// PromoteReplica: Promotes the read replica instance to be a stand-alone Cloud
-// SQL instance. Using this operation might cause your instance to restart.
+// PromoteReplica: Promotes the read replica instance to be an independent
+// Cloud SQL primary instance. Using this operation might cause your instance
+// to restart.
 //
 // - instance: Cloud SQL read replica instance name.
 // - project: ID of the project that contains the read replica.
@@ -7614,10 +7708,13 @@ func (r *InstancesService) PromoteReplica(project string, instance string) *Inst
 	return c
 }
 
-// Failover sets the optional parameter "failover": Set to true if the promote
-// operation should attempt to re-add the original primary as a replica when it
-// comes back online. Otherwise, if this value is false or not set, the
-// original primary will be a standalone instance.
+// Failover sets the optional parameter "failover": Set to true to invoke a
+// replica failover to the designated DR replica. As part of replica failover,
+// the promote operation attempts to add the original primary instance as a
+// replica of the promoted DR replica when the original primary instance comes
+// back online. If set to false or not specified, then the original primary
+// instance becomes an independent Cloud SQL primary instance. Only applicable
+// to MySQL.
 func (c *InstancesPromoteReplicaCall) Failover(failover bool) *InstancesPromoteReplicaCall {
 	c.urlParams_.Set("failover", fmt.Sprint(failover))
 	return c
@@ -8532,7 +8629,8 @@ type InstancesSwitchoverCall struct {
 	header_    http.Header
 }
 
-// Switchover: Switches over from the primary instance to a replica instance.
+// Switchover: Switches over from the primary instance to the designated DR
+// replica instance.
 //
 // - instance: Cloud SQL read replica instance name.
 // - project: ID of the project that contains the replica.
