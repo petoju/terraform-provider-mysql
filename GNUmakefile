@@ -60,6 +60,7 @@ testtidb%:
 # WARNING: this does not work as a bare task run, it only instantiates correctly inside the versioned TiDB task run
 #          otherwise MYSQL_PORT and version are unset.
 testtidb:
+	# WARNING: this does not work as a bare task run, it only instantiates correctly inside the versioned TiDB task run
 	@sh -c "'$(CURDIR)/scripts/tidb-test-cluster.sh' --init --port $(MYSQL_PORT) --version $(MYSQL_VERSION)"
 	@echo 'Waiting for TiDB...'
 	@while ! mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -e 'SELECT 1' >/dev/null 2>&1; do printf '.'; sleep 1; done ; echo ; echo "Connected!"
