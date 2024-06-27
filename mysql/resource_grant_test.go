@@ -393,7 +393,7 @@ func TestAccGrant_complexRoleGrants(t *testing.T) {
 			testAccPreCheck(t)
 			testAccPreCheckSkipMariaDB(t)
 			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
-			testAccPreCheckSkipTiDB(t)
+			testAccPreCheckSkipTiDB(t) // errors on WITH ADMIN OPTION in v7.5.2
 		},
 		ProviderFactories: testAccProviderFactories,
 		CheckDestroy:      testAccGrantCheckDestroy,

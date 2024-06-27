@@ -542,11 +542,8 @@ func serverVersionString(db *sql.DB) (string, error) {
 	return versionString, nil
 }
 
-// serverTiDB returns:
-// - it is a TiDB instance
-// - tidbVersion
-// - mysqlCompatibilityVersion
-// - err
+// serverTiDB returns whether it is a TiDB instance
+// and then returns the: tidbVersion, mysqlCompatibilityVersion
 func serverTiDB(db *sql.DB) (bool, string, string, error) {
 	currentVersionString, err := serverVersionString(db)
 	if err != nil {
