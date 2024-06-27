@@ -16,7 +16,6 @@ func TestAccDefaultRoles_basic(t *testing.T) {
 			testAccPreCheck(t)
 			testAccPreCheckSkipNotMySQL8(t)
 			testAccPreCheckSkipMariaDB(t)
-			testAccPreCheckSkipTiDB(t)
 		},
 		ProviderFactories: testAccProviderFactories,
 		CheckDestroy:      testAccDefaultRolesCheckDestroy,

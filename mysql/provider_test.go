@@ -173,7 +173,7 @@ func testAccPreCheckSkipNotMySQLVersionMin(t *testing.T, minVersion string) {
 		return
 	}
 
-	versionMin, _ := version.NewVersion("8.0.0")
+	versionMin, _ := version.NewVersion(minVersion)
 	if currentVersion.LessThan(versionMin) {
 		// TiDB 7.x series advertises as 8.0 mysql so we batch its testing strategy with Mysql8
 		isTiDB, tidbVersion, mysqlCompatibilityVersion, err := serverTiDB(db)
