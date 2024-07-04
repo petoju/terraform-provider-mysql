@@ -15,24 +15,19 @@ provider "mysql" {
   username = "root"
 }
 
-data "mysql_users" "user1" {
-  user = "user1"
-}
-
 resource "mysql_ti_resource_group" "rg1" {
   name = "rg1"
   resource_units = 2000
-  burstable = true
 }
 
 resource "mysql_ti_resource_group" "rg2" {
   name = "rg2"
   resource_units = 2000
-  burstable = true
+  burstable = false
 }
 
 resource "mysql_ti_resource_group_user_assignment" "rg1_user1" {
-  user = data.mysql_users.user1
+  user = "user1"
   resource_group = mysql_ti_resource_group.rg1.name
 }
 

@@ -37,9 +37,7 @@ func (rg *ResourceGroup) buildSQLQuery(prefix string) string {
 
 	}
 
-	if rg.Burstable {
-		query = append(query, fmt.Sprintf(`BURSTABLE = %t`, rg.Burstable))
-	}
+	query = append(query, fmt.Sprintf(`BURSTABLE = %t`, rg.Burstable))
 	query = append(query, ";")
 
 	ctx := context.TODO()
