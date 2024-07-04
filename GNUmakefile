@@ -7,6 +7,26 @@ TERRAFORM_OS=$(shell uname -s | tr A-Z a-z)
 TEST_USER=root
 TEST_PASSWORD=my-secret-pw
 
+OS_ARCH=linux_amd64
+# Set correct OS_ARCH on Mac
+UNAME := $(shell uname -s)
+ifeq ($(UNAME),Darwin)
+	HW := $(shell uname -m)
+	ifeq ($(HW),arm64)
+		ARCH=$(HW)
+	else
+		ARCH=amd64
+	endif
+	OS_ARCH=darwin_$(ARCH)
+endif
+
+HOSTNAME=registry.terraform.io
+NAMESPACE=zph
+NAME=mysql
+VERSION=9.9.9
+## on linux base os
+TERRAFORM_PLUGINS_DIRECTORY=~/.terraform.d/plugins/${HOSTNAME}/${NAMESPACE}/${NAME}/${VERSION}/${OS_ARCH}
+
 default: build
 
 build: fmtcheck
@@ -117,5 +137,18 @@ endif
 	( cd "$(GOPATH)/src/$(WEBSITE_REPO)" && git checkout 6d41be434cf85392bc9de773d8a5a8d571a195ad )
 
 	@$(MAKE) -C $(GOPATH)/src/$(WEBSITE_REPO) website-provider PROVIDER_PATH=$(shell pwd) PROVIDER_NAME=$(PKG_NAME)
+
+install:
+	mkdir -p ${TERRAFORM_PLUGINS_DIRECTORY}
+	go build -o ${TERRAFORM_PLUGINS_DIRECTORY}/terraform-provider-${NAME}
+	cd examples && rm -rf .terraform
+	cd examples && make init
+
+re-install:
+	rm -f examples/.terraform.lock.hcl
+	rm -f ${TERRAFORM_PLUGINS_DIRECTORY}/terraform-provider-${NAME}
+	go build -o ${TERRAFORM_PLUGINS_DIRECTORY}/terraform-provider-${NAME}
+	cd examples && rm -rf .terraform
+	cd examples && terraform init
 
 .PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile website website-test
