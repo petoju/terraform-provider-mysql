@@ -31,6 +31,11 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsConfig "github.com/aws/aws-sdk-go-v2/config"
+	awsCredentials "github.com/aws/aws-sdk-go-v2/credentials"
+	awsRdsAuth "github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 )
 
 const (
@@ -191,6 +196,31 @@ func Provider() *schema.Provider {
 				Optional: true,
 				Default:  false,
 			},
+			"aws_config": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Default:  nil,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"region": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"profile": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"access_key": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"secret_key": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+					},
+				},
+			},
 			"azure_config": {
 				Type:     schema.TypeList,
 				Optional: true,
@@ -262,12 +292,38 @@ func Provider() *schema.Provider {
 	}
 }
 
+func buildAwsConfig(ctx context.Context, awsConfigBlock []interface{}) (aws.Config, error) {
+	if len(awsConfigBlock) == 0 || awsConfigBlock[0] == nil {
+		return awsConfig.LoadDefaultConfig(ctx)
+	}
+
+	config := awsConfigBlock[0].(map[string]interface{})
+	optFns := make([]func(*awsConfig.LoadOptions) error, 0)
+
+	if config["region"].(string) != "" {
+		optFns = append(optFns, awsConfig.WithRegion(config["region"].(string)))
+	}
+	if config["profile"].(string) != "" {
+		optFns = append(optFns, awsConfig.WithSharedConfigProfile(config["profile"].(string)))
+	}
+	if config["access_key"].(string) != "" || config["secret_key"].(string) != "" {
+		if config["access_key"].(string) == "" || config["secret_key"].(string) == "" {
+			return aws.Config{}, fmt.Errorf("access_key and secret_key must be provided together in aws_config block")
+		}
+		optFns = append(optFns, awsConfig.WithCredentialsProvider(
+			awsCredentials.NewStaticCredentialsProvider(config["access_key"].(string), config["secret_key"].(string), ""),
+		))
+	}
+	return awsConfig.LoadDefaultConfig(ctx, optFns...)
+}
+
 func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	var endpoint = d.Get("endpoint").(string)
 	var connParams = make(map[string]string)
 	var authPlugin = d.Get("authentication_plugin").(string)
 	var allowClearTextPasswords = authPlugin == cleartextPasswords
 	var allowNativePasswords = authPlugin == nativePasswords
+	var username = d.Get("username").(string)
 	var password = d.Get("password").(string)
 	var iamAuth = d.Get("iam_database_authentication").(bool)
 	var privateIp = d.Get("private_ip").(bool)
@@ -329,6 +385,27 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	proto := "tcp"
 	if len(endpoint) > 0 && endpoint[0] == '/' {
 		proto = "unix"
+	} else if strings.HasPrefix(endpoint, "aws://") {
+		log.Printf("[DEBUG] Using AWS RDS IAM authentication")
+
+		allowClearTextPasswords = true
+		endpoint = strings.TrimPrefix(endpoint, "aws://")
+
+		awsConfigBlock := d.Get("aws_config").([]interface{})
+
+		awsConfigObj, err := buildAwsConfig(ctx, awsConfigBlock)
+		if err != nil {
+			return nil, diag.Errorf("failed to build AWS config: %v", err)
+		}
+
+		if !strings.Contains(endpoint, ":") {
+			endpoint = endpoint + ":3306"
+		}
+
+		password, err = awsRdsAuth.BuildAuthToken(ctx, endpoint, awsConfigObj.Region, username, awsConfigObj.Credentials)
+		if err != nil {
+			return nil, diag.Errorf("failed to build AWS RDS auth token: %v", err)
+		}
 	} else if strings.HasPrefix(endpoint, "cloudsql://") {
 		proto = "cloudsql"
 		endpoint = strings.ReplaceAll(endpoint, "cloudsql://", "")
@@ -433,7 +510,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	}
 
 	conf := mysql.Config{
-		User:                    d.Get("username").(string),
+		User:                    username,
 		Passwd:                  password,
 		Net:                     proto,
 		Addr:                    endpoint,

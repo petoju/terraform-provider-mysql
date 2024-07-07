@@ -109,8 +109,38 @@ provider "mysql" {
 
 **Note** It it is _strongly_ recommended to ensure that these values/variables are marked as sensitive
 
+### AWS RDS MySQL server with AWS IAM auth enabled connection
 
+To use this authentication, add `aws://` to the endpoint. This will ignore the `password` field, which will be replaced by an AWS IAM token for the currently obtained identity. You must use `username` and set `tls` to `true` or `skip-verify`, as stated in the AWS documentation.
 
+```hcl
+# Configure the MySQL provider for AWS RDS with AWS IAM authentication enabled
+provider "mysql" {
+  endpoint = "aws://your-rds-instance-name.instance-id.region.rds.amazonaws.com"
+  username = "terraform"
+  tls      = "skip-verify"
+}
+```
+
+You can also further configure the AWS connection using the `aws_config` block:
+
+```hcl
+# Configure the MySQL provider for AWS RDS with AWS IAM authentication enabled
+provider "mysql" {
+  endpoint = "aws://your-rds-instance-name.instance-id.region.rds.amazonaws.com"
+  username = "terraform"
+  tls      = "skip-verify"
+
+  aws_config {
+    region      = "your-instance-region"
+    profile     = "your-connection-profile"
+    access_key  = "your-access-key"
+    secret_key  = "your-secret-key"
+  }
+}
+```
+
+See also: [IAM database authentication for MariaDB, MySQL, and PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html).
 
 ### GCP CloudSQL Connection
 
@@ -208,3 +238,8 @@ The following arguments are supported:
   * `client_secret` - (Optional) The client secret for the Azure AD application. Can also be sourced from the `AZURE_CLIENT_SECRET` or `ARM_CLIENT_SECRET` environment variables.
   * `tenant_id` - (Optional) The tenant ID for the Azure AD application. Can also be sourced from the `AZURE_TENANT_ID` or `ARM_TENANT_ID` environment variables.
   * `environment` - (Optional) The Azure environment to use. Can also be sourced from the `AZURE_ENVIRONMENT` or `ARM_ENVIRONMENT` environment variables. Possible values are `public`, `china`, `german`, `usgovernment`. Defaults to `public`.
+* `aws_config` - (Optional) Sets the AWS configuration for the connection. This is a block containing the following arguments:
+  * `region` - (Optional) AWS Region for the AWS RDS instance. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
+  * `profile` - (Optional) AWS SDK configuration profile. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
+  * `access_key` - (Optional) AWS Access Key ID. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
+  * `secret_key` - (Optional) AWS Secret Access Key. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
