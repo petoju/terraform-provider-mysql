@@ -3,8 +3,9 @@ package mysql
 import (
 	"context"
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
 	"github.com/gofrs/uuid"
 	"github.com/hashicorp/go-version"
@@ -30,8 +31,9 @@ func resourceUserPassword() *schema.Resource {
 				Default:  "localhost",
 			},
 			"plaintext_password": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:      schema.TypeString,
+				Sensitive: true,
+				Optional:  true,
 			},
 
 			"retain_old_password": {
