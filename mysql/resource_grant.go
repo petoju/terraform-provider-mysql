@@ -33,6 +33,8 @@ type MySQLGrant interface {
 	SQLRevokeStatement() string
 	GetUserOrRole() UserOrRole
 	GrantOption() bool
+
+	ConflictsWithGrant(otherGrant MySQLGrant) bool
 }
 
 type MySQLGrantWithDatabase interface {
@@ -55,35 +57,6 @@ type MySQLGrantWithRoles interface {
 	MySQLGrant
 	GetRoles() []string
 	AppendRoles([]string)
-}
-
-func grantsConflict(grantA MySQLGrant, grantB MySQLGrant) bool {
-	if reflect.TypeOf(grantA) != reflect.TypeOf(grantB) {
-		return false
-	}
-	grantAWithDatabase, aOk := grantA.(MySQLGrantWithDatabase)
-	grantBWithDatabase, bOk := grantB.(MySQLGrantWithDatabase)
-	if aOk != bOk {
-		return false
-	}
-	if aOk && bOk {
-		if grantAWithDatabase.GetDatabase() != grantBWithDatabase.GetDatabase() {
-			return false
-		}
-	}
-
-	grantAWithTable, aOk := grantA.(MySQLGrantWithTable)
-	grantBWithTable, bOk := grantB.(MySQLGrantWithTable)
-	if aOk != bOk {
-		return false
-	}
-	if aOk && bOk {
-		if grantAWithTable.GetTable() != grantBWithTable.GetTable() {
-			return false
-		}
-	}
-
-	return true
 }
 
 type PrivilegesPartiallyRevocable interface {
@@ -173,6 +146,15 @@ func (t *TablePrivilegeGrant) SQLGrantStatement() string {
 		stmtSql += " WITH GRANT OPTION"
 	}
 	return stmtSql
+}
+
+func (t *TablePrivilegeGrant) ConflictsWithGrant(other MySQLGrant) bool {
+	otherTyped, ok := other.(*TablePrivilegeGrant)
+	if !ok {
+		return false
+	}
+	return otherTyped.GetDatabase() == t.GetDatabase() &&
+		otherTyped.GetTable() == t.GetTable()
 }
 
 // containsAllPrivilege returns true if the privileges list contains an ALL PRIVILEGES grant
@@ -273,6 +255,15 @@ func (t *ProcedurePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privileges
 	return fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
 }
 
+func (t *ProcedurePrivilegeGrant) ConflictsWithGrant(other MySQLGrant) bool {
+	otherTyped, ok := other.(*ProcedurePrivilegeGrant)
+	if !ok {
+		return false
+	}
+	return otherTyped.GetDatabase() == t.GetDatabase() &&
+		otherTyped.GetCallableName() == t.GetCallableName()
+}
+
 type RoleGrant struct {
 	Roles      []string
 	Grant      bool
@@ -313,6 +304,14 @@ func (t *RoleGrant) GetRoles() []string {
 
 func (t *RoleGrant) AppendRoles(roles []string) {
 	t.Roles = append(t.Roles, roles...)
+}
+
+func (t *RoleGrant) ConflictsWithGrant(other MySQLGrant) bool {
+	otherTyped, ok := other.(*RoleGrant)
+	if !ok {
+		return false
+	}
+	return otherTyped.GetUserOrRole() == t.GetUserOrRole()
 }
 
 func resourceGrant() *schema.Resource {
@@ -698,7 +697,7 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return nil, fmt.Errorf("failed to showUserGrants in import: %w", err)
 	}
 	for _, foundGrant := range grants {
-		if grantsConflict(desiredGrant, foundGrant) {
+		if foundGrant.ConflictsWithGrant(desiredGrant) {
 			res := resourceGrant().Data(nil)
 			setDataFromGrant(foundGrant, res)
 			return []*schema.ResourceData{res}, nil
@@ -769,7 +768,7 @@ func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.Resource
 func combineGrants(grantA MySQLGrant, grantB MySQLGrant) (MySQLGrant, error) {
 	// Check if the grants cover the same user, table, database
 	// If not, throw an error because they are unmergeable
-	if !grantsConflict(grantA, grantB) {
+	if !grantA.ConflictsWithGrant(grantB) {
 		return nil, fmt.Errorf("unable to combine MySQLGrant %s with %s because they don't cover the same table/database/user", grantA, grantB)
 	}
 
@@ -802,7 +801,7 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) 
 
 		// Check if the grants cover the same user, table, database
 		// If not, continue
-		if !grantsConflict(desiredGrant, dbGrant) {
+		if !desiredGrant.ConflictsWithGrant(dbGrant) {
 			log.Printf("[DEBUG] Skipping grant %#v as it doesn't match %#v", dbGrant, desiredGrant)
 			continue
 		}
