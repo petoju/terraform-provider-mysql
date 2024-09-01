@@ -256,6 +256,7 @@ func Provider() *schema.Provider {
 			"mysql_ti_config":         resourceTiConfigVariable(),
 			"mysql_ti_resource_group": resourceTiResourceGroup(),
 			"mysql_ti_resource_group_user_assignment": resourceTiResourceGroupUserAssignment(),
+			"mysql_ti_placement_policy":               resourceTiPlacementPolicy(),
 			"mysql_rds_config":                        resourceRDSConfig(),
 			"mysql_default_roles":                     resourceDefaultRoles(),
 		},

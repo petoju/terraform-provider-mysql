@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -15,7 +16,11 @@ import (
 
 const defaultCharacterSetKeyword = "CHARACTER SET "
 const defaultCollateKeyword = "COLLATE "
+const placementPolicyKeyword = "PLACEMENT POLICY="
+const placementPolicyDefault = "default"
 const unknownDatabaseErrCode = 1049
+
+var placementPolicyRegex = regexp.MustCompile(fmt.Sprintf("%s`([a-zA-Z0-9_-]+)`", placementPolicyKeyword))
 
 func resourceDatabase() *schema.Resource {
 	return &schema.Resource{
@@ -43,6 +48,12 @@ func resourceDatabase() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "utf8mb4_general_ci",
+			},
+
+			"placement_policy": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Default:  "",
 			},
 		},
 	}
@@ -111,6 +122,12 @@ func ReadDatabase(ctx context.Context, d *schema.ResourceData, meta interface{})
 
 	defaultCharset := extractIdentAfter(createSQL, defaultCharacterSetKeyword)
 	defaultCollation := extractIdentAfter(createSQL, defaultCollateKeyword)
+	placementPolicyMatches := placementPolicyRegex.FindStringSubmatch(createSQL)
+
+	placementPolicy := ""
+	if len(placementPolicyMatches) >= 2 {
+		placementPolicy = placementPolicyMatches[1]
+	}
 
 	if defaultCollation == "" && defaultCharset != "" {
 		// MySQL doesn't return the collation if it's the default one for
@@ -145,6 +162,7 @@ func ReadDatabase(ctx context.Context, d *schema.ResourceData, meta interface{})
 	d.Set("name", name)
 	d.Set("default_character_set", defaultCharset)
 	d.Set("default_collation", defaultCollation)
+	d.Set("placement_policy", placementPolicy)
 
 	return nil
 }
@@ -172,9 +190,11 @@ func databaseConfigSQL(verb string, d *schema.ResourceData) string {
 	name := d.Get("name").(string)
 	defaultCharset := d.Get("default_character_set").(string)
 	defaultCollation := d.Get("default_collation").(string)
+	placementPolicy := d.Get("placement_policy").(string)
 
 	var defaultCharsetClause string
 	var defaultCollationClause string
+	var placementPolicyClause string
 
 	if defaultCharset != "" {
 		defaultCharsetClause = defaultCharacterSetKeyword + quoteIdentifier(defaultCharset)
@@ -182,13 +202,19 @@ func databaseConfigSQL(verb string, d *schema.ResourceData) string {
 	if defaultCollation != "" {
 		defaultCollationClause = defaultCollateKeyword + quoteIdentifier(defaultCollation)
 	}
+	if placementPolicy != "" {
+		placementPolicyClause = placementPolicyKeyword + quoteIdentifier(placementPolicy)
+	} else {
+		placementPolicyClause = placementPolicyKeyword + quoteIdentifier(placementPolicyDefault)
+	}
 
 	return fmt.Sprintf(
-		"%s DATABASE %s %s %s",
+		"%s DATABASE %s %s %s %s",
 		verb,
 		quoteIdentifier(name),
 		defaultCharsetClause,
 		defaultCollationClause,
+		placementPolicyClause,
 	)
 }
 
