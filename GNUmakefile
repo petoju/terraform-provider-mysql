@@ -162,8 +162,8 @@ format-tag:
 	@echo $(MOST_RECENT_UPSTREAM_TAG)-$(DATESTAMP)-$(SHA_SHORT)
 
 tag:
-	@echo git tag -a $(MOST_RECENT_UPSTREAM_TAG)-$(DATESTAMP)-$(SHA_SHORT) -m $(MOST_RECENT_UPSTREAM_TAG)-$(DATESTAMP)-$(SHA_SHORT)
-	@git tag -a $(MOST_RECENT_UPSTREAM_TAG)-$(DATESTAMP)-$(SHA_SHORT) -m $(MOST_RECENT_UPSTREAM_TAG)-$(DATESTAMP)-$(SHA_SHORT)
+	@echo git tag -a $(shell cat VERSION) -m $(shell cat VERSION)
+	@git tag -a v$(shell cat VERSION) -m v$(shell cat VERSION)
 
 release:
 	@goreleaser release --clean --verbose
