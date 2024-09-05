@@ -51,9 +51,9 @@ func TestAccDatabase_collationChange(t *testing.T) {
 		CheckDestroy:      testAccDatabaseCheckDestroy(dbName),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDatabaseConfigFull(dbName, charset1, collation1),
+				Config: testAccDatabaseConfigFull(dbName, charset1, collation1, ""),
 				Check: resource.ComposeTestCheckFunc(
-					testAccDatabaseCheckFull("mysql_database.test", dbName, charset1, collation1),
+					testAccDatabaseCheckFull("mysql_database.test", dbName, charset1, collation1, ""),
 				),
 			},
 			{
@@ -70,9 +70,47 @@ func TestAccDatabase_collationChange(t *testing.T) {
 
 					db.Exec(fmt.Sprintf("ALTER DATABASE %s CHARACTER SET %s COLLATE %s", dbName, charset2, collation2))
 				},
-				Config: testAccDatabaseConfigFull(dbName, charset1, collation1),
+				Config: testAccDatabaseConfigFull(dbName, charset1, collation1, ""),
 				Check: resource.ComposeTestCheckFunc(
-					testAccDatabaseCheckFull(resourceName, dbName, charset1, collation1),
+					testAccDatabaseCheckFull(resourceName, dbName, charset1, collation1, ""),
+				),
+			},
+		},
+	})
+}
+
+func TestAccDatabase_placementPolicyChange(t *testing.T) {
+	dbName := "terraform_acceptance_test"
+
+	charset1 := "latin1"
+	collation1 := "latin1_bin"
+	placementPolicy1 := "test_policy"
+	placementPolicy2 := "test_policy_v2"
+	placementPolicyResourceName := "mysql_ti_placement_policy.test.name"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheckSkipNotTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccDatabaseCheckDestroy(dbName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDatabaseAndPlacementPolicy(dbName, charset1, collation1, placementPolicy1, placementPolicyResourceName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccDatabaseCheckFull("mysql_database.test", dbName, charset1, collation1, placementPolicy1),
+				),
+			},
+			{
+				Config: testAccDatabaseAndPlacementPolicy(dbName, charset1, collation1, placementPolicy1, ""),
+				Check: resource.ComposeTestCheckFunc(
+					testAccDatabaseCheckFull("mysql_database.test", dbName, charset1, collation1, ""),
+				),
+			},
+			{
+				Config: testAccDatabaseAndPlacementPolicy(dbName, charset1, collation1, placementPolicy2, placementPolicyResourceName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccDatabaseCheckFull("mysql_database.test", dbName, charset1, collation1, placementPolicy2),
 				),
 			},
 		},
@@ -80,10 +118,10 @@ func TestAccDatabase_collationChange(t *testing.T) {
 }
 
 func testAccDatabaseCheckBasic(rn string, name string) resource.TestCheckFunc {
-	return testAccDatabaseCheckFull(rn, name, "utf8mb4", "utf8mb4_bin")
+	return testAccDatabaseCheckFull(rn, name, "utf8mb4", "utf8mb4_bin", "")
 }
 
-func testAccDatabaseCheckFull(rn string, name string, charset string, collation string) resource.TestCheckFunc {
+func testAccDatabaseCheckFull(rn string, name string, charset string, collation string, placementPolicy string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]
 		if !ok {
@@ -123,6 +161,12 @@ func testAccDatabaseCheckFull(rn string, name string, charset string, collation 
 			}
 		}
 
+		if !strings.Contains(createSQL, fmt.Sprintf("PLACEMENT POLICY=`%s`", placementPolicy)) && placementPolicy != "" {
+			return fmt.Errorf("placement policy expected %s", placementPolicy)
+		} else if strings.Contains(createSQL, "PLACEMENT POLICY=") && placementPolicy == "" {
+			return fmt.Errorf("placement policy expected to be empty")
+		}
+
 		return nil
 	}
 }
@@ -150,14 +194,28 @@ func testAccDatabaseCheckDestroy(name string) resource.TestCheckFunc {
 }
 
 func testAccDatabaseConfigBasic(name string) string {
-	return testAccDatabaseConfigFull(name, "utf8mb4", "utf8mb4_bin")
+	return testAccDatabaseConfigFull(name, "utf8mb4", "utf8mb4_bin", "")
 }
 
-func testAccDatabaseConfigFull(name string, charset string, collation string) string {
+func testAccDatabaseConfigFull(name string, charset string, collation string, placementPolicy string) string {
+	placementPolicyConfig := ""
+	if placementPolicy != "" {
+		placementPolicyConfig = fmt.Sprintf(`placement_policy = %s`, placementPolicy)
+	}
+
 	return fmt.Sprintf(`
 resource "mysql_database" "test" {
     name = "%s"
     default_character_set = "%s"
     default_collation = "%s"
-}`, name, charset, collation)
+    %s
+}`, name, charset, collation, placementPolicyConfig)
+}
+
+func testAccDatabaseAndPlacementPolicy(name string, charset string, collation string, placementPolicy string, databasePlacementPolicy string) string {
+	return fmt.Sprintf(
+		"%s\n%s",
+		testAccPlacementPolicyConfigBasic(placementPolicy),
+		testAccDatabaseConfigFull(name, charset, collation, databasePlacementPolicy),
+	)
 }
