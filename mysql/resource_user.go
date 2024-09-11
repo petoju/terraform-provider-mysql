@@ -58,7 +58,7 @@ func resourceUser() *schema.Resource {
 				Optional:         true,
 				ForceNew:         true,
 				DiffSuppressFunc: NewEmptyStringSuppressFunc,
-				ConflictsWith:    []string{"plaintext_password", "password"},
+				ConflictsWith:    []string{"password"},
 			},
 
 			"aad_identity": {
@@ -193,6 +193,9 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 	if authStm != "" {
 		stmtSQL = stmtSQL + authStm
+		if password != "" {
+			stmtSQL = stmtSQL + fmt.Sprintf(" BY '%s'", password)
+		}
 	} else if password != "" {
 		stmtSQL = stmtSQL + fmt.Sprintf(" IDENTIFIED BY '%s'", password)
 	}

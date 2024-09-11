@@ -78,12 +78,45 @@ func TestAccUser_auth(t *testing.T) {
 				),
 			},
 			{
+				Config: testAccUserConfig_auth_native_plaintext,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "jdoe"),
+					resource.TestCheckResourceAttr("mysql_user.test", "host", "example.com"),
+					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "mysql_native_password"),
+				),
+			},
+			{
 				Config: testAccUserConfig_auth_iam_plugin,
 				Check: resource.ComposeTestCheckFunc(
 					testAccUserAuthExists("mysql_user.test"),
 					resource.TestCheckResourceAttr("mysql_user.test", "user", "jdoe"),
 					resource.TestCheckResourceAttr("mysql_user.test", "host", "example.com"),
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "mysql_no_login"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccUser_auth_mysql8(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheckSkipTiDB(t)
+			testAccPreCheckSkipMariaDB(t)
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.14")
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "jdoe"),
+					resource.TestCheckResourceAttr("mysql_user.test", "host", "example.com"),
+					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "caching_sha2_password"),
 				),
 			},
 		},
@@ -155,6 +188,46 @@ func TestAccUser_authConnectRetainOldPassword(t *testing.T) {
 			},
 			{
 				Config: testAccUserConfig_newNewPass_retain_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+				ExpectError: regexp.MustCompile(`.*Access denied for user 'jdoe'.*`),
+			},
+			{
+				Config: testAccUserConfig_auth_native_plaintext_retain_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_native_plaintext_newPass_retain_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+					testAccUserAuthValid("jdoe", "password2"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_native_plaintext_newNewPass_retain_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+				ExpectError: regexp.MustCompile(`.*Access denied for user 'jdoe'.*`),
+			},
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password_retain_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password_newPass_retain_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+					testAccUserAuthValid("jdoe", "password2"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password_newNewPass_retain_old_password,
 				Check: resource.ComposeTestCheckFunc(
 					testAccUserAuthValid("jdoe", "password"),
 				),
@@ -361,6 +434,24 @@ resource "mysql_user" "test" {
 }
 `
 
+const testAccUserConfig_auth_native_plaintext = `
+resource "mysql_user" "test" {
+    user               = "jdoe"
+    host               = "example.com"
+    auth_plugin        = "mysql_native_password"
+    plaintext_password = "password"
+}
+`
+
+const testAccUserConfig_auth_caching_sha2_password = `
+resource "mysql_user" "test" {
+    user               = "jdoe"
+    host               = "example.com"
+    auth_plugin        = "caching_sha2_password"
+    plaintext_password = "password"
+}
+`
+
 const testAccUserConfig_basic_retain_old_password = `
 resource "mysql_user" "test" {
     user = "jdoe"
@@ -384,6 +475,66 @@ resource "mysql_user" "test" {
     user = "jdoe"
     host = "%"
     plaintext_password = "password3"
+    retain_old_password = true
+}
+`
+
+const testAccUserConfig_auth_native_plaintext_retain_old_password = `
+resource "mysql_user" "test" {
+    user                = "jdoe"
+    host                = "%"
+    auth_plugin         = "mysql_native_password"
+    plaintext_password  = "password"
+    retain_old_password = true
+}
+`
+
+const testAccUserConfig_auth_native_plaintext_newPass_retain_old_password = `
+resource "mysql_user" "test" {
+    user                = "jdoe"
+    host                = "%"
+    auth_plugin         = "mysql_native_password"
+    plaintext_password  = "password2"
+    retain_old_password = true
+}
+`
+
+const testAccUserConfig_auth_native_plaintext_newNewPass_retain_old_password = `
+resource "mysql_user" "test" {
+    user                = "jdoe"
+    host                = "%"
+    auth_plugin         = "mysql_native_password"
+    plaintext_password  = "password3"
+    retain_old_password = true
+}
+`
+
+const testAccUserConfig_auth_caching_sha2_password_retain_old_password = `
+resource "mysql_user" "test" {
+    user                = "jdoe"
+    host                = "%"
+    auth_plugin         = "caching_sha2_password"
+    plaintext_password  = "password"
+    retain_old_password = true
+}
+`
+
+const testAccUserConfig_auth_caching_sha2_password_newPass_retain_old_password = `
+resource "mysql_user" "test" {
+    user                = "jdoe"
+    host                = "%"
+    auth_plugin         = "caching_sha2_password"
+    plaintext_password  = "password2"
+    retain_old_password = true
+}
+`
+
+const testAccUserConfig_auth_caching_sha2_password_newNewPass_retain_old_password = `
+resource "mysql_user" "test" {
+    user                = "jdoe"
+    host                = "%"
+    auth_plugin         = "caching_sha2_password"
+    plaintext_password  = "password3"
     retain_old_password = true
 }
 `
