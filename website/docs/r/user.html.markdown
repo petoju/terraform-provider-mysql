@@ -47,6 +47,17 @@ resource "mysql_user" "nologin" {
 }
 ```
 
+## Example Usage with caching_sha2_password Authentication Plugin and plaintext password
+
+```hcl
+resource "mysql_user" "nologin" {
+  user               = "nologin"
+  host               = "example.com"
+  auth_plugin        = "caching_sha2_password"
+  plaintext_password = "password"
+}
+```
+
 ## Example Usage with AzureAD Authentication Plugin
 
 ```hcl
@@ -68,9 +79,9 @@ The following arguments are supported:
 
 * `user` - (Required) The name of the user.
 * `host` - (Optional) The source host of the user. Defaults to "localhost".
-* `plaintext_password` - (Optional) The password for the user. This must be provided in plain text, so the data source for it must be secured. An _unsalted_ hash of the provided password is stored in state. Conflicts with `auth_plugin`.
-* `password` - (Optional) Deprecated alias of `plaintext_password`, whose value is *stored as plaintext in state*. Prefer to use `plaintext_password` instead, which stores the password as an unsalted hash. Conflicts with `auth_plugin`.
-* `auth_plugin` - (Optional) Use an [authentication plugin][ref-auth-plugins] to authenticate the user instead of using password authentication.  Description of the fields allowed in the block below. Conflicts with `password` and `plaintext_password`.  
+* `plaintext_password` - (Optional) The password for the user. This must be provided in plain text, so the data source for it must be secured. An _unsalted_ hash of the provided password is stored in state.
+* `password` - (Optional) Deprecated alias of `plaintext_password`, whose value is _stored as plaintext in state_. Prefer to use `plaintext_password` instead, which stores the password as an unsalted hash.
+* `auth_plugin` - (Optional) Use an [authentication plugin][ref-auth-plugins] to authenticate the user instead of using password authentication.  Description of the fields allowed in the block below.
 * `auth_string_hashed` - (Optional) Use an already hashed string as a parameter to `auth_plugin`. This can be used with passwords as well as with other auth strings.
 * `aad_identity` - (Optional) Required when `auth_plugin` is `aad_auth`. This should be block containing `type` and `identity`. `type` can be one of `user`, `group` and `service_principal`. `identity` then should containt either UPN of user, name of group or Client ID of service principal.
 * `retain_old_password` - (Optional) When `true`, the old password is retained when changing the password. Defaults to `false`. This use MySQL Dual Password Support feature and requires MySQL version 8.0.14 or newer. See [MySQL Dual Password documentation](https://dev.mysql.com/doc/refman/8.0/en/password-management.html#dual-passwords) for more.
