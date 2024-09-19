@@ -13,12 +13,12 @@ fragmentation. We will update this readme if those design choices change.
 
 zph fork will use release naming in the following form:
 
-v3.0.62-20240705-3c7af6a
+v3.0.62005
 
-{petoju version}-{date}-{sha}
+{petoju version}{sequential int of additional applied patches}
 
 This indicates that the base is v3.0.62 from petoju, with modifications from zph
-repo using {sha} and built on {date}.
+repo that are 5 patch sets added.
 
 It allows for keeping patches alive on this fork until they land upstream and are
 released there.
@@ -27,7 +27,9 @@ released there.
 
 We sign releases with a GPG key currently using goreleaser locally on the personal
 equipment of @ZPH. As the maintainer of this fork, I, @ZPH, attest that the builds
-represent the exact SHA of the version control with no alterations.
+represent the exact SHA of the version control with no alterations. The credentials
+are stored in a credential manager with layers of safeguards and no other individuals
+have access.
 
 The near term goal is to setup github actions to provide this guarantee
 so that even if I were a malicious actor or coerced,
