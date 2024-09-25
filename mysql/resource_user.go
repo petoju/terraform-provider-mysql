@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 
 	"github.com/hashicorp/go-version"
@@ -200,20 +199,7 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		stmtSQL = stmtSQL + fmt.Sprintf(" IDENTIFIED BY '%s'", password)
 	}
 
-	requiredVersion, _ := version.NewVersion("5.7.0")
-
 	var updateStmtSql = ""
-
-	if getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) && d.Get("tls_option").(string) != "" {
-		if createObj == "AADUSER" {
-			updateStmtSql = fmt.Sprintf("ALTER USER '%s'@'%s' REQUIRE %s",
-				d.Get("user").(string),
-				d.Get("host").(string),
-				d.Get("tls_option").(string))
-		} else {
-			stmtSQL += fmt.Sprintf(" REQUIRE %s", d.Get("tls_option").(string))
-		}
-	}
 
 	retainPassword := d.Get("retain_old_password").(bool)
 	if retainPassword {
@@ -247,12 +233,6 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 func getSetPasswordStatement(ctx context.Context, meta interface{}, retainPassword bool) (string, error) {
 	if retainPassword {
 		return "ALTER USER ?@? IDENTIFIED BY ? RETAIN CURRENT PASSWORD", nil
-	}
-
-	/* ALTER USER syntax introduced in MySQL 5.7.6 deprecates SET PASSWORD (GH-8230) */
-	ver, _ := version.NewVersion("5.7.6")
-	if getVersionFromMeta(ctx, meta).LessThan(ver) {
-		return "SET PASSWORD FOR ?@? = PASSWORD(?)", nil
 	}
 
 	return "ALTER USER ?@? IDENTIFIED BY ?", nil
@@ -323,22 +303,6 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		}
 	}
 
-	requiredVersion, _ := version.NewVersion("5.7.0")
-	if d.HasChange("tls_option") && getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) {
-		var stmtSQL string
-
-		stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' REQUIRE %s",
-			d.Get("user").(string),
-			d.Get("host").(string),
-			d.Get("tls_option").(string))
-
-		log.Println("[DEBUG] Executing query:", stmtSQL)
-		_, err := db.ExecContext(ctx, stmtSQL)
-		if err != nil {
-			return diag.Errorf("failed setting require tls option: %v", err)
-		}
-	}
-
 	return nil
 }
 
@@ -347,99 +311,24 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 	if err != nil {
 		return diag.FromErr(err)
 	}
-	requiredVersion, _ := version.NewVersion("5.7.0")
-	if getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) {
-		stmt := "SHOW CREATE USER ?@?"
+	// Worse user detection, only for compat with MySQL 5.6
+	stmtSQL := fmt.Sprintf("SELECT USER FROM mysql.user WHERE USER='%s'",
+		d.Get("user").(string))
 
-		var createUserStmt string
-		err := db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
-		if err != nil {
-			errorNumber := mysqlErrorNumber(err)
-			if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode {
-				d.SetId("")
-				return nil
-			}
-			return diag.Errorf("failed getting user: %v", err)
-		}
+	log.Println("[DEBUG] Executing statement:", stmtSQL)
 
-		// Examples of create user:
-		// CREATE USER 'some_app'@'%' IDENTIFIED WITH 'mysql_native_password' AS '*0something' REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK
-		// CREATE USER `jdoe-tf-test-47`@`example.com` IDENTIFIED WITH 'caching_sha2_password' REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK PASSWORD HISTORY DEFAULT PASSWORD REUSE INTERVAL DEFAULT PASSWORD REQUIRE CURRENT DEFAULT
-		// CREATE USER `jdoe`@`example.com` IDENTIFIED WITH 'caching_sha2_password' AS '$A$005$i`xay#fG/\' TrbkNA82' REQUIRE NONE PASSWORD
-		re := regexp.MustCompile("^CREATE USER ['`]([^'`]*)['`]@['`]([^'`]*)['`] IDENTIFIED WITH ['`]([^'`]*)['`] (?:AS '((?:.*?[^\\\\])?)' )?REQUIRE ([^ ]*)")
-		if m := re.FindStringSubmatch(createUserStmt); len(m) == 6 {
-			d.Set("user", m[1])
-			d.Set("host", m[2])
-			d.Set("auth_plugin", m[3])
-			d.Set("tls_option", m[5])
+	rows, err := db.QueryContext(ctx, stmtSQL)
+	if err != nil {
+		return diag.Errorf("failed getting user from DB: %v", err)
+	}
+	defer rows.Close()
 
-			if m[3] == "aad_auth" {
-				// AADGroup:98e61c8d-e104-4f8c-b1a6-7ae873617fe6:upn:Doe_Family_Group
-				// AADUser:98e61c8d-e104-4f8c-b1a6-7ae873617fe6:upn:little.johny@does.onmicrosoft.com
-				// AADSP:98e61c8d-e104-4f8c-b1a6-7ae873617fe6:upn:mysqlUserName - for MySQL Flexible Server
-				// AADApp:98e61c8d-e104-4f8c-b1a6-7ae873617fe6:upn:mysqlUserName - for MySQL Single Server
-				parts := strings.Split(m[4], ":")
-				if parts[0] == "AADSP" || parts[0] == "AADApp" {
-					// service principals are referenced by UUID only
-					d.Set("aad_identity", []map[string]interface{}{
-						{
-							"type":     "service_principal",
-							"identity": parts[1],
-						},
-					})
-				} else if len(parts) >= 4 {
-					// users and groups should be referenced by UPN / group name
-					if parts[0] == "AADUser" {
-						d.Set("aad_identity", []map[string]interface{}{
-							{
-								"type":     "user",
-								"identity": strings.Join(parts[3:], ":"),
-							},
-						})
-					} else {
-						d.Set("aad_identity", []map[string]interface{}{
-							{
-								"type":     "group",
-								"identity": strings.Join(parts[3:], ":"),
-							},
-						})
-					}
-				} else {
-					return diag.Errorf("AAD identity couldn't be parsed - it is %s", m[4])
-				}
-			} else {
-				d.Set("auth_string_hashed", m[4])
-			}
-			return nil
-		}
-
-		// Try 2 - just whether the user is there.
-		re2 := regexp.MustCompile("^CREATE USER")
-		if m := re2.FindStringSubmatch(createUserStmt); m != nil {
-			// Ok, we have at least something - it's probably in MariaDB.
-			return nil
-		}
-		return diag.Errorf("Create user couldn't be parsed - it is %s", createUserStmt)
-	} else {
-		// Worse user detection, only for compat with MySQL 5.6
-		stmtSQL := fmt.Sprintf("SELECT USER FROM mysql.user WHERE USER='%s'",
-			d.Get("user").(string))
-
-		log.Println("[DEBUG] Executing statement:", stmtSQL)
-
-		rows, err := db.QueryContext(ctx, stmtSQL)
-		if err != nil {
-			return diag.Errorf("failed getting user from DB: %v", err)
-		}
-		defer rows.Close()
-
-		if !rows.Next() && rows.Err() == nil {
-			d.SetId("")
-			return nil
-		}
-		if rows.Err() != nil {
-			return diag.Errorf("failed getting rows: %v", rows.Err())
-		}
+	if !rows.Next() && rows.Err() == nil {
+		d.SetId("")
+		return nil
+	}
+	if rows.Err() != nil {
+		return diag.Errorf("failed getting rows: %v", rows.Err())
 	}
 	return nil
 }
