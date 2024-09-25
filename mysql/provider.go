@@ -551,22 +551,10 @@ func afterConnectVersion(ctx context.Context, mysqlConf *MySQLConfiguration, db 
 		return nil, fmt.Errorf("failed getting server version: %v", err)
 	}
 
-	versionMinInclusive, _ := version.NewVersion("5.7.5")
-	versionMaxExclusive, _ := version.NewVersion("8.0.0")
-	if currentVersion.GreaterThanOrEqual(versionMinInclusive) &&
-		currentVersion.LessThan(versionMaxExclusive) {
-		// We set NO_AUTO_CREATE_USER to prevent provider from creating user when creating grants. Newer MySQL has it automatically.
-		// We don't want any other modes, esp. not ANSI_QUOTES.
-		_, err = db.ExecContext(ctx, `SET SESSION sql_mode='NO_AUTO_CREATE_USER'`)
-		if err != nil {
-			return nil, fmt.Errorf("failed setting SQL mode: %v", err)
-		}
-	} else {
-		// We don't want any modes, esp. not ANSI_QUOTES.
-		_, err = db.ExecContext(ctx, `SET SESSION sql_mode=''`)
-		if err != nil {
-			return nil, fmt.Errorf("failed setting SQL mode: %v", err)
-		}
+	// We don't want any modes, esp. not ANSI_QUOTES.
+	_, err = db.ExecContext(ctx, `SET SESSION sql_mode=''`)
+	if err != nil {
+		return nil, fmt.Errorf("failed setting SQL mode: %v", err)
 	}
 
 	return currentVersion, nil
