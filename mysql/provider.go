@@ -147,11 +147,13 @@ func Provider() *schema.Provider {
 						},
 						"client_cert": {
 							Type:     schema.TypeString,
-							Required: true,
+							Default:  "",
+							Optional: true,
 						},
 						"client_key": {
 							Type:     schema.TypeString,
-							Required: true,
+							Default:  "",
+							Optional: true,
 						},
 					},
 				},
@@ -333,6 +335,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	customTLSMap := d.Get("custom_tls").([]interface{})
 	if len(customTLSMap) > 0 {
 		var customTLS CustomTLS
+		var rootCertPool *x509.CertPool
 		customMap := customTLSMap[0].(map[string]interface{})
 		customTLSJson, err := json.Marshal(customMap)
 		if err != nil {
@@ -345,36 +348,45 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 
 		var pem []byte
-		rootCertPool := x509.NewCertPool()
-		if strings.HasPrefix(customTLS.CACert, "-----BEGIN") {
-			pem = []byte(customTLS.CACert)
+		if customTLS.CACert != "" {
+			rootCertPool := x509.NewCertPool()
+			if strings.HasPrefix(customTLS.CACert, "-----BEGIN") {
+				pem = []byte(customTLS.CACert)
+			} else {
+				pem, err = os.ReadFile(customTLS.CACert)
+				if err != nil {
+					return nil, diag.Errorf("failed to read CA cert: %v", err)
+				}
+			}
+			if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+				return nil, diag.Errorf("failed to append pem: %v", pem)
+			}
 		} else {
-			pem, err = os.ReadFile(customTLS.CACert)
+			// Use system cert pool as fallback
+			rootCertPool, err = x509.SystemCertPool()
 			if err != nil {
-				return nil, diag.Errorf("failed to read CA cert: %v", err)
+				return nil, diag.Errorf("failed to get system cert pool: %v", err)
 			}
 		}
 
-		if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
-			return nil, diag.Errorf("failed to append pem: %v", pem)
-		}
-
-		clientCert := make([]tls.Certificate, 0, 1)
-		var certs tls.Certificate
-		if strings.HasPrefix(customTLS.ClientCert, "-----BEGIN") {
-			certs, err = tls.X509KeyPair([]byte(customTLS.ClientCert), []byte(customTLS.ClientKey))
-		} else {
-			certs, err = tls.LoadX509KeyPair(customTLS.ClientCert, customTLS.ClientKey)
-		}
-		if err != nil {
-			return nil, diag.Errorf("error loading keypair: %v", err)
-		}
-
-		clientCert = append(clientCert, certs)
 		tlsConfigStruct = &tls.Config{
-			RootCAs:      rootCertPool,
-			Certificates: clientCert,
+			RootCAs: rootCertPool,
 		}
+
+		var cert tls.Certificate
+
+		if customTLS.ClientCert != "" && customTLS.ClientKey != "" {
+			if strings.HasPrefix(customTLS.ClientCert, "-----BEGIN") {
+				cert, err = tls.X509KeyPair([]byte(customTLS.ClientCert), []byte(customTLS.ClientKey))
+			} else {
+				cert, err = tls.LoadX509KeyPair(customTLS.ClientCert, customTLS.ClientKey)
+			}
+			if err != nil {
+				return nil, diag.Errorf("error loading keypair: %v", err)
+			}
+			tlsConfigStruct.Certificates = []tls.Certificate{cert}
+		}
+
 		err = mysql.RegisterTLSConfig(customTLS.ConfigKey, tlsConfigStruct)
 		if err != nil {
 			return nil, diag.Errorf("failed registering TLS config: %v", err)
