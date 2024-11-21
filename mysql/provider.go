@@ -137,23 +137,24 @@ func Provider() *schema.Provider {
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"config_key": {
-							Type:     schema.TypeString,
-							Default:  "custom",
-							Optional: true,
+							Type:        schema.TypeString,
+							Optional:    true,
+							DefaultFunc: schema.EnvDefaultFunc("MYSQL_TLS_CONFIG_KEY", "custom"),
 						},
 						"ca_cert": {
-							Type:     schema.TypeString,
-							Required: true,
+							Type:        schema.TypeString,
+							Required:    true,
+							DefaultFunc: schema.EnvDefaultFunc("MYSQL_TLS_CA_CERT", nil),
 						},
 						"client_cert": {
-							Type:     schema.TypeString,
-							Default:  "",
-							Optional: true,
+							Type:        schema.TypeString,
+							Optional:    true,
+							DefaultFunc: schema.EnvDefaultFunc("MYSQL_TLS_CLIENT_CERT", ""),
 						},
 						"client_key": {
-							Type:     schema.TypeString,
-							Default:  "",
-							Optional: true,
+							Type:        schema.TypeString,
+							Optional:    true,
+							DefaultFunc: schema.EnvDefaultFunc("MYSQL_TLS_CLIENT_KEY", ""),
 						},
 					},
 				},
@@ -331,11 +332,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var privateIp = d.Get("private_ip").(bool)
 	var tlsConfig = d.Get("tls").(string)
 	var tlsConfigStruct *tls.Config
+	configKey := "default"
 
 	customTLSMap := d.Get("custom_tls").([]interface{})
 	if len(customTLSMap) > 0 {
+		log.Printf("[DEBUG] Using custom TLS config")
 		var customTLS CustomTLS
-		var rootCertPool *x509.CertPool
 		customMap := customTLSMap[0].(map[string]interface{})
 		customTLSJson, err := json.Marshal(customMap)
 		if err != nil {
@@ -347,8 +349,16 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			return nil, diag.Errorf("failed to unmarshal tls config %v with error %v", customTLSJson, err)
 		}
 
+		// Update the configKey if it is set
+		if customTLS.ConfigKey != "" {
+			configKey = customTLS.ConfigKey
+		}
+
+		tlsConfigStruct = &tls.Config{}
+
 		var pem []byte
 		if customTLS.CACert != "" {
+			log.Printf("[DEBUG] Using custom CA cert")
 			rootCertPool := x509.NewCertPool()
 			if strings.HasPrefix(customTLS.CACert, "-----BEGIN") {
 				pem = []byte(customTLS.CACert)
@@ -361,21 +371,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
 				return nil, diag.Errorf("failed to append pem: %v", pem)
 			}
-		} else {
-			// Use system cert pool as fallback
-			rootCertPool, err = x509.SystemCertPool()
-			if err != nil {
-				return nil, diag.Errorf("failed to get system cert pool: %v", err)
-			}
+			tlsConfigStruct.RootCAs = rootCertPool
 		}
-
-		tlsConfigStruct = &tls.Config{
-			RootCAs: rootCertPool,
-		}
-
-		var cert tls.Certificate
 
 		if customTLS.ClientCert != "" && customTLS.ClientKey != "" {
+			log.Printf("[DEBUG] Using custom ClientCert & ClientKey")
+			var cert tls.Certificate
 			if strings.HasPrefix(customTLS.ClientCert, "-----BEGIN") {
 				cert, err = tls.X509KeyPair([]byte(customTLS.ClientCert), []byte(customTLS.ClientKey))
 			} else {
@@ -387,11 +388,12 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			tlsConfigStruct.Certificates = []tls.Certificate{cert}
 		}
 
-		err = mysql.RegisterTLSConfig(customTLS.ConfigKey, tlsConfigStruct)
+		// Register the config
+		err = mysql.RegisterTLSConfig(configKey, tlsConfigStruct)
 		if err != nil {
 			return nil, diag.Errorf("failed registering TLS config: %v", err)
 		}
-		tlsConfig = customTLS.ConfigKey
+		tlsConfig = configKey
 	}
 
 	proto := "tcp"
