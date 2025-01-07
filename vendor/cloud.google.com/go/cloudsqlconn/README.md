@@ -235,6 +235,99 @@ func connect() {
 }
 ```
 
+### Using DNS domain names to identify instances
+
+The connector can be configured to use DNS to look up an instance. This would
+allow you to configure your application to connect to a database instance, and
+centrally configure which instance in your DNS zone.
+
+#### Configure your DNS Records
+
+Add a DNS TXT record for the Cloud SQL instance to a **private** DNS server 
+or a private Google Cloud DNS Zone used by your application. 
+
+**Note:** You are strongly discouraged from adding DNS records for your 
+Cloud SQL instances to a public DNS server. This would allow anyone on the
+internet to discover the Cloud SQL instance name. 
+
+For example: suppose you wanted to use the domain name 
+`prod-db.mycompany.example.com` to connect to your database instance 
+`my-project:region:my-instance`. You would create the following DNS record: 
+
+- Record type: `TXT` 
+- Name: `prod-db.mycompany.example.com` – This is the domain name used by the application
+- Value: `my-project:region:my-instance` – This is the instance name
+
+#### Configure the connector
+
+Configure the connector as described above, replacing the conenctor ID with
+the DNS name. 
+
+Adapting the MySQL + database/sql example above:
+
+```go
+package main
+
+import (
+	"database/sql"
+
+	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/cloudsqlconn/mysql/mysql"
+)
+
+func connect() {
+	cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
+		cloudsqlconn.WithDNSResolver(),
+		cloudsqlconn.WithCredentialsFile("key.json"))
+	if err != nil {
+		// ... handle error
+	}
+	// call cleanup when you're done with the database connection
+	defer cleanup()
+
+	db, err := sql.Open(
+		"cloudsql-mysql",
+		"myuser:mypass@cloudsql-mysql(prod-db.mycompany.example.com)/mydb",
+	)
+	// ... etc
+}
+```
+
+### Automatic fail-over using DNS domain names
+
+When the connector is configured using a domain name, the connector will 
+periodically check if the DNS record for an instance changes. When the connector 
+detects that the domain name refers to a different instance, the connector will
+close all open connections to the old instance. Subsequent connection attempts
+will be directed to the new instance. 
+
+For example: suppose application is configured to connect using the
+domain name `prod-db.mycompany.example.com`. Initially the corporate DNS 
+zone has a TXT record with the value `my-project:region:my-instance`. The
+application establishes connections to the `my-project:region:my-instance` 
+Cloud SQL instance. 
+
+Then, to reconfigure the application to use a different database
+instance, change the value of the `prod-db.mycompany.example.com` DNS record
+from `my-project:region:my-instance` to `my-project:other-region:my-instance-2`
+
+The connector inside the application detects the change to this
+DNS record. Now, when the application connects to its database using the 
+domain name `prod-db.mycompany.example.com`, it will connect to the
+`my-project:other-region:my-instance-2` Cloud SQL instance. 
+
+The connector will automatically close all existing connections to
+`my-project:region:my-instance`. This will force the connection pools to 
+establish new connections. Also, it may cause database queries in progress 
+to fail. 
+
+The connector will poll for changes to the DNS name every 30 seconds by default.
+You may configure the frequency of the connections using the option 
+`WithFailoverPeriod(d time.Duration)`. When this is set to 0, the connector will
+disable polling and only check if the DNS record changed when it is
+creating a new connection. 
+
+
 ### Using Options
 
 If you need to customize something about the `Dialer`, you can initialize
@@ -341,7 +434,9 @@ Supported metrics include:
 - `cloudsqlconn/refresh_success_count`: The number of successful certificate
   refresh operations
 - `cloudsqlconn/refresh_failure_count`: The number of failed refresh
-  operations.
+  operations
+- `cloudsqlconn/bytes_sent`: The number of bytes sent to Cloud SQL
+- `cloudsqlconn/bytes_received`: The number of bytes received from Cloud SQL
 
 Supported traces include:
 

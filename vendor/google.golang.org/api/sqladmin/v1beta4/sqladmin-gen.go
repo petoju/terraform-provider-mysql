@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC.
+// Copyright 2025 Google LLC.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -62,11 +62,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 
+	"github.com/googleapis/gax-go/v2/internallog"
 	googleapi "google.golang.org/api/googleapi"
 	internal "google.golang.org/api/internal"
 	gensupport "google.golang.org/api/internal/gensupport"
@@ -90,6 +92,7 @@ var _ = strings.Replace
 var _ = context.Canceled
 var _ = internaloption.WithDefaultEndpoint
 var _ = internal.Version
+var _ = internallog.New
 
 const apiId = "sqladmin:v1beta4"
 const apiName = "sqladmin"
@@ -124,7 +127,17 @@ func NewService(ctx context.Context, opts ...option.ClientOption) (*Service, err
 	if err != nil {
 		return nil, err
 	}
-	s, err := New(client)
+	s := &Service{client: client, BasePath: basePath, logger: internaloption.GetLogger(opts)}
+	s.BackupRuns = NewBackupRunsService(s)
+	s.Connect = NewConnectService(s)
+	s.Databases = NewDatabasesService(s)
+	s.Flags = NewFlagsService(s)
+	s.Instances = NewInstancesService(s)
+	s.Operations = NewOperationsService(s)
+	s.Projects = NewProjectsService(s)
+	s.SslCerts = NewSslCertsService(s)
+	s.Tiers = NewTiersService(s)
+	s.Users = NewUsersService(s)
 	if err != nil {
 		return nil, err
 	}
@@ -143,22 +156,12 @@ func New(client *http.Client) (*Service, error) {
 	if client == nil {
 		return nil, errors.New("client is nil")
 	}
-	s := &Service{client: client, BasePath: basePath}
-	s.BackupRuns = NewBackupRunsService(s)
-	s.Connect = NewConnectService(s)
-	s.Databases = NewDatabasesService(s)
-	s.Flags = NewFlagsService(s)
-	s.Instances = NewInstancesService(s)
-	s.Operations = NewOperationsService(s)
-	s.Projects = NewProjectsService(s)
-	s.SslCerts = NewSslCertsService(s)
-	s.Tiers = NewTiersService(s)
-	s.Users = NewUsersService(s)
-	return s, nil
+	return NewService(context.Background(), option.WithHTTPClient(client))
 }
 
 type Service struct {
 	client    *http.Client
+	logger    *slog.Logger
 	BasePath  string // API endpoint base URL
 	UserAgent string // optional additional User-Agent fragment
 
@@ -592,8 +595,8 @@ type BackupRun struct {
 	//
 	// Possible values:
 	//   "SQL_BACKUP_KIND_UNSPECIFIED" - This is an unknown BackupKind.
-	//   "SNAPSHOT" - The snapshot based backups
-	//   "PHYSICAL" - Physical backups
+	//   "SNAPSHOT" - Snapshot-based backups.
+	//   "PHYSICAL" - Physical backups.
 	BackupKind string `json:"backupKind,omitempty"`
 	// Description: The description of this run, only applicable to on-demand
 	// backups.
@@ -622,6 +625,9 @@ type BackupRun struct {
 	Kind string `json:"kind,omitempty"`
 	// Location: Location of the backups.
 	Location string `json:"location,omitempty"`
+	// MaxChargeableBytes: Output only. The maximum chargeable bytes for the
+	// backup.
+	MaxChargeableBytes int64 `json:"maxChargeableBytes,omitempty,string"`
 	// SelfLink: The URI of this resource.
 	SelfLink string `json:"selfLink,omitempty"`
 	// StartTime: The time the backup operation actually started in UTC timezone in
@@ -766,6 +772,11 @@ type CloneContext struct {
 	// PointInTime: Timestamp, if specified, identifies the time to which the
 	// source instance is cloned.
 	PointInTime string `json:"pointInTime,omitempty"`
+	// PreferredSecondaryZone: Optional. Copy clone and point-in-time recovery
+	// clone of a regional instance in the specified zones. If not specified, clone
+	// to the same secondary zone as the source instance. This value cannot be the
+	// same as the preferred_zone field.
+	PreferredSecondaryZone string `json:"preferredSecondaryZone,omitempty"`
 	// PreferredZone: Optional. Copy clone and point-in-time recovery clone of an
 	// instance to the specified zone. If no zone is specified, clone to the same
 	// primary zone as the source instance.
@@ -802,6 +813,9 @@ type ConnectSettings struct {
 	//   "SECOND_GEN" - V2 speckle instance.
 	//   "EXTERNAL" - On premises instance.
 	BackendType string `json:"backendType,omitempty"`
+	// CustomSubjectAlternativeNames: Custom subject alternative names for the
+	// server certificate.
+	CustomSubjectAlternativeNames []string `json:"customSubjectAlternativeNames,omitempty"`
 	// DatabaseVersion: The database engine type and version. The `databaseVersion`
 	// field cannot be changed after instance creation. MySQL instances:
 	// `MYSQL_8_0`, `MYSQL_5_7` (default), or `MYSQL_5_6`. PostgreSQL instances:
@@ -818,21 +832,6 @@ type ConnectSettings struct {
 	//   "MYSQL_5_5" - The database version is MySQL 5.5.
 	//   "MYSQL_5_6" - The database version is MySQL 5.6.
 	//   "MYSQL_5_7" - The database version is MySQL 5.7.
-	//   "SQLSERVER_2017_STANDARD" - The database version is SQL Server 2017
-	// Standard.
-	//   "SQLSERVER_2017_ENTERPRISE" - The database version is SQL Server 2017
-	// Enterprise.
-	//   "SQLSERVER_2017_EXPRESS" - The database version is SQL Server 2017
-	// Express.
-	//   "SQLSERVER_2017_WEB" - The database version is SQL Server 2017 Web.
-	//   "POSTGRES_9_6" - The database version is PostgreSQL 9.6.
-	//   "POSTGRES_10" - The database version is PostgreSQL 10.
-	//   "POSTGRES_11" - The database version is PostgreSQL 11.
-	//   "POSTGRES_12" - The database version is PostgreSQL 12.
-	//   "POSTGRES_13" - The database version is PostgreSQL 13.
-	//   "POSTGRES_14" - The database version is PostgreSQL 14.
-	//   "POSTGRES_15" - The database version is PostgreSQL 15.
-	//   "POSTGRES_16" - The database version is PostgreSQL 16.
 	//   "MYSQL_8_0" - The database version is MySQL 8.
 	//   "MYSQL_8_0_18" - The database major version is MySQL 8.0 and the minor
 	// version is 18.
@@ -866,9 +865,27 @@ type ConnectSettings struct {
 	// version is 39.
 	//   "MYSQL_8_0_40" - The database major version is MySQL 8.0 and the minor
 	// version is 40.
+	//   "MYSQL_8_0_41" - The database major version is MySQL 8.0 and the minor
+	// version is 41.
+	//   "MYSQL_8_0_42" - The database major version is MySQL 8.0 and the minor
+	// version is 42.
 	//   "MYSQL_8_4" - The database version is MySQL 8.4.
-	//   "MYSQL_8_4_0" - The database version is MySQL 8.4 and the patch version is
-	// 0.
+	//   "SQLSERVER_2017_STANDARD" - The database version is SQL Server 2017
+	// Standard.
+	//   "SQLSERVER_2017_ENTERPRISE" - The database version is SQL Server 2017
+	// Enterprise.
+	//   "SQLSERVER_2017_EXPRESS" - The database version is SQL Server 2017
+	// Express.
+	//   "SQLSERVER_2017_WEB" - The database version is SQL Server 2017 Web.
+	//   "POSTGRES_9_6" - The database version is PostgreSQL 9.6.
+	//   "POSTGRES_10" - The database version is PostgreSQL 10.
+	//   "POSTGRES_11" - The database version is PostgreSQL 11.
+	//   "POSTGRES_12" - The database version is PostgreSQL 12.
+	//   "POSTGRES_13" - The database version is PostgreSQL 13.
+	//   "POSTGRES_14" - The database version is PostgreSQL 14.
+	//   "POSTGRES_15" - The database version is PostgreSQL 15.
+	//   "POSTGRES_16" - The database version is PostgreSQL 16.
+	//   "POSTGRES_17" - The database version is PostgreSQL 17.
 	//   "SQLSERVER_2019_STANDARD" - The database version is SQL Server 2019
 	// Standard.
 	//   "SQLSERVER_2019_ENTERPRISE" - The database version is SQL Server 2019
@@ -897,6 +914,15 @@ type ConnectSettings struct {
 	Region string `json:"region,omitempty"`
 	// ServerCaCert: SSL configuration.
 	ServerCaCert *SslCert `json:"serverCaCert,omitempty"`
+	// ServerCaMode: Specify what type of CA is used for the server certificate.
+	//
+	// Possible values:
+	//   "CA_MODE_UNSPECIFIED" - CA mode is unspecified. It is effectively the same
+	// as `GOOGLE_MANAGED_INTERNAL_CA`.
+	//   "GOOGLE_MANAGED_INTERNAL_CA" - Google-managed self-signed internal CA.
+	//   "GOOGLE_MANAGED_CAS_CA" - Google-managed regional CA part of root CA
+	// hierarchy hosted on Google Cloud's Certificate Authority Service (CAS).
+	ServerCaMode string `json:"serverCaMode,omitempty"`
 
 	// ServerResponse contains the HTTP response code and headers from the server.
 	googleapi.ServerResponse `json:"-"`
@@ -1057,21 +1083,6 @@ type DatabaseInstance struct {
 	//   "MYSQL_5_5" - The database version is MySQL 5.5.
 	//   "MYSQL_5_6" - The database version is MySQL 5.6.
 	//   "MYSQL_5_7" - The database version is MySQL 5.7.
-	//   "SQLSERVER_2017_STANDARD" - The database version is SQL Server 2017
-	// Standard.
-	//   "SQLSERVER_2017_ENTERPRISE" - The database version is SQL Server 2017
-	// Enterprise.
-	//   "SQLSERVER_2017_EXPRESS" - The database version is SQL Server 2017
-	// Express.
-	//   "SQLSERVER_2017_WEB" - The database version is SQL Server 2017 Web.
-	//   "POSTGRES_9_6" - The database version is PostgreSQL 9.6.
-	//   "POSTGRES_10" - The database version is PostgreSQL 10.
-	//   "POSTGRES_11" - The database version is PostgreSQL 11.
-	//   "POSTGRES_12" - The database version is PostgreSQL 12.
-	//   "POSTGRES_13" - The database version is PostgreSQL 13.
-	//   "POSTGRES_14" - The database version is PostgreSQL 14.
-	//   "POSTGRES_15" - The database version is PostgreSQL 15.
-	//   "POSTGRES_16" - The database version is PostgreSQL 16.
 	//   "MYSQL_8_0" - The database version is MySQL 8.
 	//   "MYSQL_8_0_18" - The database major version is MySQL 8.0 and the minor
 	// version is 18.
@@ -1105,9 +1116,27 @@ type DatabaseInstance struct {
 	// version is 39.
 	//   "MYSQL_8_0_40" - The database major version is MySQL 8.0 and the minor
 	// version is 40.
+	//   "MYSQL_8_0_41" - The database major version is MySQL 8.0 and the minor
+	// version is 41.
+	//   "MYSQL_8_0_42" - The database major version is MySQL 8.0 and the minor
+	// version is 42.
 	//   "MYSQL_8_4" - The database version is MySQL 8.4.
-	//   "MYSQL_8_4_0" - The database version is MySQL 8.4 and the patch version is
-	// 0.
+	//   "SQLSERVER_2017_STANDARD" - The database version is SQL Server 2017
+	// Standard.
+	//   "SQLSERVER_2017_ENTERPRISE" - The database version is SQL Server 2017
+	// Enterprise.
+	//   "SQLSERVER_2017_EXPRESS" - The database version is SQL Server 2017
+	// Express.
+	//   "SQLSERVER_2017_WEB" - The database version is SQL Server 2017 Web.
+	//   "POSTGRES_9_6" - The database version is PostgreSQL 9.6.
+	//   "POSTGRES_10" - The database version is PostgreSQL 10.
+	//   "POSTGRES_11" - The database version is PostgreSQL 11.
+	//   "POSTGRES_12" - The database version is PostgreSQL 12.
+	//   "POSTGRES_13" - The database version is PostgreSQL 13.
+	//   "POSTGRES_14" - The database version is PostgreSQL 14.
+	//   "POSTGRES_15" - The database version is PostgreSQL 15.
+	//   "POSTGRES_16" - The database version is PostgreSQL 16.
+	//   "POSTGRES_17" - The database version is PostgreSQL 17.
 	//   "SQLSERVER_2019_STANDARD" - The database version is SQL Server 2019
 	// Standard.
 	//   "SQLSERVER_2019_ENTERPRISE" - The database version is SQL Server 2019
@@ -1196,12 +1225,15 @@ type DatabaseInstance struct {
 	ReplicaNames []string `json:"replicaNames,omitempty"`
 	// ReplicationCluster: A primary instance and disaster recovery (DR) replica
 	// pair. A DR replica is a cross-region replica that you designate for failover
-	// in the event that the primary instance experiences regional failure. Only
-	// applicable to MySQL.
+	// in the event that the primary instance experiences regional failure.
+	// Applicable to MySQL and PostgreSQL.
 	ReplicationCluster *ReplicationCluster `json:"replicationCluster,omitempty"`
 	// RootPassword: Initial root password. Use only on creation. You must set root
 	// passwords before you can connect to PostgreSQL instances.
 	RootPassword string `json:"rootPassword,omitempty"`
+	// SatisfiesPzi: Output only. This status indicates whether the instance
+	// satisfies PZI. The status is reserved for future use.
+	SatisfiesPzi bool `json:"satisfiesPzi,omitempty"`
 	// SatisfiesPzs: This status indicates whether the instance satisfies PZS. The
 	// status is reserved for future use.
 	SatisfiesPzs bool `json:"satisfiesPzs,omitempty"`
@@ -1260,6 +1292,17 @@ type DatabaseInstance struct {
 	//   "KMS_KEY_ISSUE" - The KMS key used by the instance is either revoked or
 	// denied access to
 	SuspensionReason []string `json:"suspensionReason,omitempty"`
+	// SwitchTransactionLogsToCloudStorageEnabled: Input only. Whether Cloud SQL is
+	// enabled to switch storing point-in-time recovery log files from a data disk
+	// to Cloud Storage.
+	SwitchTransactionLogsToCloudStorageEnabled bool `json:"switchTransactionLogsToCloudStorageEnabled,omitempty"`
+	// Tags: Optional. Input only. Immutable. Tag keys and tag values that are
+	// bound to this instance. You must represent each item in the map as: "" :
+	// "". For example, a single resource can have the following tags: ```
+	// "123/environment": "production", "123/costCenter": "marketing", ``` For more
+	// information on tag creation and management, see
+	// https://cloud.google.com/resource-manager/docs/tags/tags-overview.
+	Tags map[string]string `json:"tags,omitempty"`
 	// UpgradableDatabaseVersions: Output only. All database versions that are
 	// available for upgrade.
 	UpgradableDatabaseVersions []*AvailableDatabaseVersion `json:"upgradableDatabaseVersions,omitempty"`
@@ -1634,6 +1677,19 @@ type ExportContextBakExportOptions struct {
 	// DifferentialBase: Whether or not the backup can be used as a differential
 	// base copy_only backup can not be served as differential base
 	DifferentialBase bool `json:"differentialBase,omitempty"`
+	// ExportLogEndTime: Optional. The end timestamp when transaction log will be
+	// included in the export operation. RFC 3339
+	// (https://tools.ietf.org/html/rfc3339) format (for example,
+	// `2023-10-01T16:19:00.094`) in UTC. When omitted, all available logs until
+	// current time will be included. Only applied to Cloud SQL for SQL Server.
+	ExportLogEndTime string `json:"exportLogEndTime,omitempty"`
+	// ExportLogStartTime: Optional. The begin timestamp when transaction log will
+	// be included in the export operation. RFC 3339
+	// (https://tools.ietf.org/html/rfc3339) format (for example,
+	// `2023-10-01T16:19:00.094`) in UTC. When omitted, all available logs from the
+	// beginning of retention period will be included. Only applied to Cloud SQL
+	// for SQL Server.
+	ExportLogStartTime string `json:"exportLogStartTime,omitempty"`
 	// StripeCount: Option for specifying how many stripes to use for the export.
 	// If blank, and the value of the striped field is true, the number of stripes
 	// is automatically chosen.
@@ -1783,6 +1839,28 @@ func (s ExportContextSqlExportOptionsPostgresExportOptions) MarshalJSON() ([]byt
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// ExternalSyncSelectedObject: The selected object that Cloud SQL migrates.
+type ExternalSyncSelectedObject struct {
+	// Database: The name of the database that Cloud SQL migrates.
+	Database string `json:"database,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "Database") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "Database") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s ExternalSyncSelectedObject) MarshalJSON() ([]byte, error) {
+	type NoMethod ExternalSyncSelectedObject
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // FailoverContext: Database instance failover context.
 type FailoverContext struct {
 	// Kind: This is always `sql#failoverContext`.
@@ -1832,21 +1910,6 @@ type Flag struct {
 	//   "MYSQL_5_5" - The database version is MySQL 5.5.
 	//   "MYSQL_5_6" - The database version is MySQL 5.6.
 	//   "MYSQL_5_7" - The database version is MySQL 5.7.
-	//   "SQLSERVER_2017_STANDARD" - The database version is SQL Server 2017
-	// Standard.
-	//   "SQLSERVER_2017_ENTERPRISE" - The database version is SQL Server 2017
-	// Enterprise.
-	//   "SQLSERVER_2017_EXPRESS" - The database version is SQL Server 2017
-	// Express.
-	//   "SQLSERVER_2017_WEB" - The database version is SQL Server 2017 Web.
-	//   "POSTGRES_9_6" - The database version is PostgreSQL 9.6.
-	//   "POSTGRES_10" - The database version is PostgreSQL 10.
-	//   "POSTGRES_11" - The database version is PostgreSQL 11.
-	//   "POSTGRES_12" - The database version is PostgreSQL 12.
-	//   "POSTGRES_13" - The database version is PostgreSQL 13.
-	//   "POSTGRES_14" - The database version is PostgreSQL 14.
-	//   "POSTGRES_15" - The database version is PostgreSQL 15.
-	//   "POSTGRES_16" - The database version is PostgreSQL 16.
 	//   "MYSQL_8_0" - The database version is MySQL 8.
 	//   "MYSQL_8_0_18" - The database major version is MySQL 8.0 and the minor
 	// version is 18.
@@ -1880,9 +1943,27 @@ type Flag struct {
 	// version is 39.
 	//   "MYSQL_8_0_40" - The database major version is MySQL 8.0 and the minor
 	// version is 40.
+	//   "MYSQL_8_0_41" - The database major version is MySQL 8.0 and the minor
+	// version is 41.
+	//   "MYSQL_8_0_42" - The database major version is MySQL 8.0 and the minor
+	// version is 42.
 	//   "MYSQL_8_4" - The database version is MySQL 8.4.
-	//   "MYSQL_8_4_0" - The database version is MySQL 8.4 and the patch version is
-	// 0.
+	//   "SQLSERVER_2017_STANDARD" - The database version is SQL Server 2017
+	// Standard.
+	//   "SQLSERVER_2017_ENTERPRISE" - The database version is SQL Server 2017
+	// Enterprise.
+	//   "SQLSERVER_2017_EXPRESS" - The database version is SQL Server 2017
+	// Express.
+	//   "SQLSERVER_2017_WEB" - The database version is SQL Server 2017 Web.
+	//   "POSTGRES_9_6" - The database version is PostgreSQL 9.6.
+	//   "POSTGRES_10" - The database version is PostgreSQL 10.
+	//   "POSTGRES_11" - The database version is PostgreSQL 11.
+	//   "POSTGRES_12" - The database version is PostgreSQL 12.
+	//   "POSTGRES_13" - The database version is PostgreSQL 13.
+	//   "POSTGRES_14" - The database version is PostgreSQL 14.
+	//   "POSTGRES_15" - The database version is PostgreSQL 15.
+	//   "POSTGRES_16" - The database version is PostgreSQL 16.
+	//   "POSTGRES_17" - The database version is PostgreSQL 17.
 	//   "SQLSERVER_2019_STANDARD" - The database version is SQL Server 2019
 	// Standard.
 	//   "SQLSERVER_2019_ENTERPRISE" - The database version is SQL Server 2019
@@ -2570,6 +2651,40 @@ func (s InstancesListServerCasResponse) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// InstancesListServerCertificatesResponse: Instances ListServerCertificatess
+// response.
+type InstancesListServerCertificatesResponse struct {
+	// ActiveVersion: The `sha1_fingerprint` of the active certificate from
+	// `server_certs`.
+	ActiveVersion string `json:"activeVersion,omitempty"`
+	// CaCerts: List of server CA certificates for the instance.
+	CaCerts []*SslCert `json:"caCerts,omitempty"`
+	// Kind: This is always `sql#instancesListServerCertificates`.
+	Kind string `json:"kind,omitempty"`
+	// ServerCerts: List of server certificates for the instance, signed by the
+	// corresponding CA from the `ca_certs` list.
+	ServerCerts []*SslCert `json:"serverCerts,omitempty"`
+
+	// ServerResponse contains the HTTP response code and headers from the server.
+	googleapi.ServerResponse `json:"-"`
+	// ForceSendFields is a list of field names (e.g. "ActiveVersion") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "ActiveVersion") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s InstancesListServerCertificatesResponse) MarshalJSON() ([]byte, error) {
+	type NoMethod InstancesListServerCertificatesResponse
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // InstancesReencryptRequest: Database Instance reencrypt request.
 type InstancesReencryptRequest struct {
 	// BackupReencryptionConfig: Configuration specific to backup re-encryption
@@ -2638,6 +2753,30 @@ func (s InstancesRotateServerCaRequest) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// InstancesRotateServerCertificateRequest: Rotate Server Certificate request.
+type InstancesRotateServerCertificateRequest struct {
+	// RotateServerCertificateContext: Optional. Contains details about the rotate
+	// server CA operation.
+	RotateServerCertificateContext *RotateServerCertificateContext `json:"rotateServerCertificateContext,omitempty"`
+	// ForceSendFields is a list of field names (e.g.
+	// "RotateServerCertificateContext") to unconditionally include in API
+	// requests. By default, fields with empty or default values are omitted from
+	// API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "RotateServerCertificateContext")
+	// to include in API requests with the JSON null value. By default, fields with
+	// empty values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s InstancesRotateServerCertificateRequest) MarshalJSON() ([]byte, error) {
+	type NoMethod InstancesRotateServerCertificateRequest
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // InstancesTruncateLogRequest: Instance truncate log request.
 type InstancesTruncateLogRequest struct {
 	// TruncateLogContext: Contains details about the truncate log operation.
@@ -2673,6 +2812,9 @@ type IpConfiguration struct {
 	// connect to the instance using the IP. In 'CIDR' notation, also known as
 	// 'slash' notation (for example: `157.197.200.0/24`).
 	AuthorizedNetworks []*AclEntry `json:"authorizedNetworks,omitempty"`
+	// CustomSubjectAlternativeNames: Optional. Custom Subject Alternative
+	// Name(SAN)s for a Cloud SQL instance.
+	CustomSubjectAlternativeNames []string `json:"customSubjectAlternativeNames,omitempty"`
 	// EnablePrivatePathForGoogleCloudServices: Controls connectivity to private IP
 	// instances from Google services, such as BigQuery.
 	EnablePrivatePathForGoogleCloudServices bool `json:"enablePrivatePathForGoogleCloudServices,omitempty"`
@@ -2693,6 +2835,21 @@ type IpConfiguration struct {
 	// enforcing the requirement for valid client certificates, then use the
 	// `ssl_mode` flag instead of the legacy `require_ssl` flag.
 	RequireSsl bool `json:"requireSsl,omitempty"`
+	// ServerCaMode: Specify what type of CA is used for the server certificate.
+	//
+	// Possible values:
+	//   "CA_MODE_UNSPECIFIED" - CA mode is unspecified. It is effectively the same
+	// as `GOOGLE_MANAGED_INTERNAL_CA`.
+	//   "GOOGLE_MANAGED_INTERNAL_CA" - Google-managed self-signed internal CA.
+	//   "GOOGLE_MANAGED_CAS_CA" - Google-managed regional CA part of root CA
+	// hierarchy hosted on Google Cloud's Certificate Authority Service (CAS).
+	//   "CUSTOMER_MANAGED_CAS_CA" - Customer-managed CA hosted on Google Cloud's
+	// Certificate Authority Service (CAS).
+	ServerCaMode string `json:"serverCaMode,omitempty"`
+	// ServerCaPool: Optional. The resource name of the server CA pool for an
+	// instance with `CUSTOMER_MANAGED_CAS_CA` as the `server_ca_mode`. Format:
+	// projects//locations//caPools/
+	ServerCaPool string `json:"serverCaPool,omitempty"`
 	// SslMode: Specify how SSL/TLS is enforced in database connections. If you
 	// must use the `require_ssl` flag for backward compatibility, then only the
 	// following value pairs are valid: For PostgreSQL and MySQL: *
@@ -2967,9 +3124,25 @@ type OnPremisesConfiguration struct {
 	Kind string `json:"kind,omitempty"`
 	// Password: The password for connecting to on-premises instance.
 	Password string `json:"password,omitempty"`
+	// SelectedObjects: Optional. A list of objects that the user selects for
+	// replication from an external source instance.
+	SelectedObjects []*SelectedObjects `json:"selectedObjects,omitempty"`
 	// SourceInstance: The reference to Cloud SQL instance if the source is Cloud
 	// SQL.
 	SourceInstance *InstanceReference `json:"sourceInstance,omitempty"`
+	// SslOption: Optional. SslOption for replica connection to the on-premises
+	// source.
+	//
+	// Possible values:
+	//   "SSL_OPTION_UNSPECIFIED" - Unknown SSL option i.e. SSL option not
+	// specified by user.
+	//   "DISABLE" - SSL is disabled for replica connection to the on-premises
+	// source.
+	//   "REQUIRE" - SSL is required for replica connection to the on-premises
+	// source.
+	//   "VERIFY_CA" - Verify CA is required for replica connection to the
+	// on-premises source.
+	SslOption string `json:"sslOption,omitempty"`
 	// Username: The username for connecting to on-premises instance.
 	Username string `json:"username,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "CaCertificate") to
@@ -3095,6 +3268,10 @@ type Operation struct {
 	//   "SWITCHOVER_TO_REPLICA" - Switches a primary instance to a replica. This
 	// operation runs as part of a switchover operation to the original primary
 	// instance.
+	//   "MAJOR_VERSION_UPGRADE" - Updates the major version of a Cloud SQL
+	// instance.
+	//   "ADVANCED_BACKUP" - Creates a backup for an Advanced BackupTier Cloud SQL
+	// instance.
 	OperationType string `json:"operationType,omitempty"`
 	// SelfLink: The URI of this resource.
 	SelfLink string `json:"selfLink,omitempty"`
@@ -3111,6 +3288,8 @@ type Operation struct {
 	//   "RUNNING" - The operation is running.
 	//   "DONE" - The operation completed.
 	Status string `json:"status,omitempty"`
+	// SubOperationType: Optional. The sub operation based on the operation type.
+	SubOperationType *SqlSubOperationType `json:"subOperationType,omitempty"`
 	// TargetId: Name of the database instance related to this operation.
 	TargetId   string `json:"targetId,omitempty"`
 	TargetLink string `json:"targetLink,omitempty"`
@@ -3196,8 +3375,8 @@ type OperationMetadata struct {
 	ApiVersion string `json:"apiVersion,omitempty"`
 	// CancelRequested: Output only. Identifies whether the user has requested
 	// cancellation of the operation. Operations that have been cancelled
-	// successfully have Operation.error value with a google.rpc.Status.code of 1,
-	// corresponding to `Code.CANCELLED`.
+	// successfully have google.longrunning.Operation.error value with a
+	// google.rpc.Status.code of `1`, corresponding to `Code.CANCELLED`.
 	CancelRequested bool `json:"cancelRequested,omitempty"`
 	// CreateTime: Output only. The time the operation was created.
 	CreateTime string `json:"createTime,omitempty"`
@@ -3347,6 +3526,43 @@ func (s PerformDiskShrinkContext) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// PscAutoConnectionConfig: Settings for an automatically-setup Private Service
+// Connect consumer endpoint that is used to connect to a Cloud SQL instance.
+type PscAutoConnectionConfig struct {
+	// ConsumerNetwork: The consumer network of this consumer endpoint. This must
+	// be a resource path that includes both the host project and the network name.
+	// For example, `projects/project1/global/networks/network1`. The consumer host
+	// project of this network might be different from the consumer service
+	// project.
+	ConsumerNetwork string `json:"consumerNetwork,omitempty"`
+	// ConsumerNetworkStatus: The connection policy status of the consumer network.
+	ConsumerNetworkStatus string `json:"consumerNetworkStatus,omitempty"`
+	// ConsumerProject: This is the project ID of consumer service project of this
+	// consumer endpoint. Optional. This is only applicable if consumer_network is
+	// a shared vpc network.
+	ConsumerProject string `json:"consumerProject,omitempty"`
+	// IpAddress: The IP address of the consumer endpoint.
+	IpAddress string `json:"ipAddress,omitempty"`
+	// Status: The connection status of the consumer endpoint.
+	Status string `json:"status,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "ConsumerNetwork") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "ConsumerNetwork") to include in
+	// API requests with the JSON null value. By default, fields with empty values
+	// are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s PscAutoConnectionConfig) MarshalJSON() ([]byte, error) {
+	type NoMethod PscAutoConnectionConfig
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // PscConfig: PSC settings for a Cloud SQL instance.
 type PscConfig struct {
 	// AllowedConsumerProjects: Optional. The list of consumer projects that are
@@ -3355,6 +3571,10 @@ type PscConfig struct {
 	// project in this list may be represented by a project number (numeric) or by
 	// a project id (alphanumeric).
 	AllowedConsumerProjects []string `json:"allowedConsumerProjects,omitempty"`
+	// PscAutoConnections: Optional. The list of settings for requested Private
+	// Service Connect consumer endpoints that can be used to connect to this Cloud
+	// SQL instance.
+	PscAutoConnections []*PscAutoConnectionConfig `json:"pscAutoConnections,omitempty"`
 	// PscEnabled: Whether PSC connectivity is enabled for this instance.
 	PscEnabled bool `json:"pscEnabled,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "AllowedConsumerProjects") to
@@ -3418,8 +3638,8 @@ func (s ReplicaConfiguration) MarshalJSON() ([]byte, error) {
 
 // ReplicationCluster: A primary instance and disaster recovery (DR) replica
 // pair. A DR replica is a cross-region replica that you designate for failover
-// in the event that the primary instance has regional failure. Only applicable
-// to MySQL.
+// in the event that the primary instance has regional failure. Applicable to
+// MySQL and PostgreSQL.
 type ReplicationCluster struct {
 	// DrReplica: Output only. Read-only field that indicates whether the replica
 	// is a DR replica. This field is not set if the instance is a primary
@@ -3432,14 +3652,14 @@ type ReplicationCluster struct {
 	// replica name to designate a DR replica for a primary instance. Remove the
 	// replica name to remove the DR replica designation.
 	FailoverDrReplicaName string `json:"failoverDrReplicaName,omitempty"`
-	// PsaWriteEndpoint: Output only. If set, it indicates this instance has a
-	// private service access (PSA) dns endpoint that is pointing to the primary
-	// instance of the cluster. If this instance is the primary, the dns should be
-	// pointing to this instance. After Switchover or Replica failover, this DNS
-	// endpoint points to the promoted instance. This is a read-only field,
-	// returned to the user as information. This field can exist even if a
-	// standalone instance does not yet have a replica, or had a DR replica that
-	// was deleted.
+	// PsaWriteEndpoint: Output only. If set, this field indicates this instance
+	// has a private service access (PSA) DNS endpoint that is pointing to the
+	// primary instance of the cluster. If this instance is the primary, then the
+	// DNS endpoint points to this instance. After a switchover or replica failover
+	// operation, this DNS endpoint points to the promoted instance. This is a
+	// read-only field, returned to the user as information. This field can exist
+	// even if a standalone instance doesn't have a DR replica yet or the DR
+	// replica is deleted.
 	PsaWriteEndpoint string `json:"psaWriteEndpoint,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "DrReplica") to
 	// unconditionally include in API requests. By default, fields with empty or
@@ -3543,6 +3763,55 @@ type RotateServerCaContext struct {
 
 func (s RotateServerCaContext) MarshalJSON() ([]byte, error) {
 	type NoMethod RotateServerCaContext
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
+// RotateServerCertificateContext: Instance rotate server certificate context.
+type RotateServerCertificateContext struct {
+	// Kind: Optional. This is always `sql#rotateServerCertificateContext`.
+	Kind string `json:"kind,omitempty"`
+	// NextVersion: Optional. The fingerprint of the next version to be rotated to.
+	// If left unspecified, will be rotated to the most recently added server
+	// certificate version.
+	NextVersion string `json:"nextVersion,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "Kind") to unconditionally
+	// include in API requests. By default, fields with empty or default values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "Kind") to include in API requests
+	// with the JSON null value. By default, fields with empty values are omitted
+	// from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s RotateServerCertificateContext) MarshalJSON() ([]byte, error) {
+	type NoMethod RotateServerCertificateContext
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
+// SelectedObjects: A list of objects that the user selects for replication
+// from an external source instance.
+type SelectedObjects struct {
+	// Database: Required. The name of the database to migrate.
+	Database string `json:"database,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "Database") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "Database") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s SelectedObjects) MarshalJSON() ([]byte, error) {
+	type NoMethod SelectedObjects
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
@@ -3803,7 +4072,8 @@ type SqlExternalSyncSettingError struct {
 	// MySQL.
 	//   "SQLSERVER_AGENT_NOT_RUNNING" - SQL Server Agent is not running.
 	//   "UNSUPPORTED_TABLE_DEFINITION" - The table definition is not support due
-	// to missing primary key or replica identity, applicable for postgres.
+	// to missing primary key or replica identity, applicable for postgres. Note
+	// that this is a warning and won't block the migration.
 	//   "UNSUPPORTED_DEFINER" - The customer has a definer that will break EM
 	// setup.
 	//   "SQLSERVER_SERVERNAME_MISMATCH" - SQL Server @@SERVERNAME does not match
@@ -3867,6 +4137,20 @@ type SqlExternalSyncSettingError struct {
 	// the specified extensions are not enabled on destination instance. For
 	// example, before you can migrate data to the destination instance, you must
 	// enable the PGAudit extension on the instance.
+	//   "UNSUPPORTED_COLUMNS" - The source database has generated columns that
+	// can't be migrated. Please change them to regular columns before migration.
+	//   "USERS_NOT_CREATED_IN_REPLICA" - The source database has users that aren't
+	// created in the replica. First, create all users, which are in the
+	// pg_user_mappings table of the source database, in the destination instance.
+	// Then, perform the migration.
+	//   "UNSUPPORTED_SYSTEM_OBJECTS" - The selected objects include system objects
+	// that aren't supported for migration.
+	//   "UNSUPPORTED_TABLES_WITH_REPLICA_IDENTITY" - The source database has
+	// tables with the FULL or NOTHING replica identity. Before starting your
+	// migration, either remove the identity or change it to DEFAULT. Note that
+	// this is an error and will block the migration.
+	//   "SELECTED_OBJECTS_NOT_EXIST_ON_SOURCE" - The selected objects don't exist
+	// on the source instance.
 	Type string `json:"type,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "Detail") to unconditionally
 	// include in API requests. By default, fields with empty or default values are
@@ -4092,6 +4376,9 @@ type SqlInstancesVerifyExternalSyncSettingsRequest struct {
 	MigrationType string `json:"migrationType,omitempty"`
 	// MysqlSyncConfig: Optional. MySQL-specific settings for start external sync.
 	MysqlSyncConfig *MySqlSyncConfig `json:"mysqlSyncConfig,omitempty"`
+	// SelectedObjects: Optional. Migrate only the specified objects from the
+	// source instance. If this field is empty, then migrate all objects.
+	SelectedObjects []*ExternalSyncSelectedObject `json:"selectedObjects,omitempty"`
 	// SyncMode: External sync mode
 	//
 	// Possible values:
@@ -4307,6 +4594,45 @@ type SqlServerUserDetails struct {
 
 func (s SqlServerUserDetails) MarshalJSON() ([]byte, error) {
 	type NoMethod SqlServerUserDetails
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
+// SqlSubOperationType: The sub operation type based on the operation type.
+type SqlSubOperationType struct {
+	// MaintenanceType: The type of maintenance to be performed on the instance.
+	//
+	// Possible values:
+	//   "SQL_MAINTENANCE_TYPE_UNSPECIFIED" - Maintenance type is unspecified.
+	//   "INSTANCE_MAINTENANCE" - Indicates that a standalone instance is
+	// undergoing maintenance. The instance can be either a primary instance or a
+	// replica.
+	//   "REPLICA_INCLUDED_MAINTENANCE" - Indicates that the primary instance and
+	// all of its replicas, including cascading replicas, are undergoing
+	// maintenance. Maintenance is performed on groups of replicas first, followed
+	// by the primary instance.
+	//   "INSTANCE_SELF_SERVICE_MAINTENANCE" - Indicates that the standalone
+	// instance is undergoing maintenance, initiated by self-service. The instance
+	// can be either a primary instance or a replica.
+	//   "REPLICA_INCLUDED_SELF_SERVICE_MAINTENANCE" - Indicates that the primary
+	// instance and all of its replicas are undergoing maintenance, initiated by
+	// self-service. Maintenance is performed on groups of replicas first, followed
+	// by the primary instance.
+	MaintenanceType string `json:"maintenanceType,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "MaintenanceType") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "MaintenanceType") to include in
+	// API requests with the JSON null value. By default, fields with empty values
+	// are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s SqlSubOperationType) MarshalJSON() ([]byte, error) {
+	type NoMethod SqlSubOperationType
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
@@ -4642,9 +4968,11 @@ type User struct {
 	//   "BUILT_IN" - The database's built-in user type.
 	//   "CLOUD_IAM_USER" - Cloud IAM user.
 	//   "CLOUD_IAM_SERVICE_ACCOUNT" - Cloud IAM service account.
-	//   "CLOUD_IAM_GROUP" - Cloud IAM group non-login user.
-	//   "CLOUD_IAM_GROUP_USER" - Cloud IAM group login user.
-	//   "CLOUD_IAM_GROUP_SERVICE_ACCOUNT" - Cloud IAM group service account.
+	//   "CLOUD_IAM_GROUP" - Cloud IAM group. Not used for login.
+	//   "CLOUD_IAM_GROUP_USER" - Read-only. Login for a user that belongs to the
+	// Cloud IAM group.
+	//   "CLOUD_IAM_GROUP_SERVICE_ACCOUNT" - Read-only. Login for a service account
+	// that belongs to the Cloud IAM group.
 	Type string `json:"type,omitempty"`
 
 	// ServerResponse contains the HTTP response code and headers from the server.
@@ -4781,12 +5109,11 @@ func (c *BackupRunsDeleteCall) Header() http.Header {
 
 func (c *BackupRunsDeleteCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/backupRuns/{id}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("DELETE", urls, body)
+	req, err := http.NewRequest("DELETE", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -4796,6 +5123,7 @@ func (c *BackupRunsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		"instance": c.instance,
 		"id":       strconv.FormatInt(c.id, 10),
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.backupRuns.delete", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -4830,9 +5158,11 @@ func (c *BackupRunsDeleteCall) Do(opts ...googleapi.CallOption) (*Operation, err
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.backupRuns.delete", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -4896,12 +5226,11 @@ func (c *BackupRunsGetCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/backupRuns/{id}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -4911,6 +5240,7 @@ func (c *BackupRunsGetCall) doRequest(alt string) (*http.Response, error) {
 		"instance": c.instance,
 		"id":       strconv.FormatInt(c.id, 10),
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.backupRuns.get", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -4945,9 +5275,11 @@ func (c *BackupRunsGetCall) Do(opts ...googleapi.CallOption) (*BackupRun, error)
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.backupRuns.get", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -4998,8 +5330,7 @@ func (c *BackupRunsInsertCall) Header() http.Header {
 
 func (c *BackupRunsInsertCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.backuprun)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.backuprun)
 	if err != nil {
 		return nil, err
 	}
@@ -5016,6 +5347,7 @@ func (c *BackupRunsInsertCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.backupRuns.insert", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5050,9 +5382,11 @@ func (c *BackupRunsInsertCall) Do(opts ...googleapi.CallOption) (*Operation, err
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.backupRuns.insert", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5130,12 +5464,11 @@ func (c *BackupRunsListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/backupRuns")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5144,6 +5477,7 @@ func (c *BackupRunsListCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.backupRuns.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5179,9 +5513,11 @@ func (c *BackupRunsListCall) Do(opts ...googleapi.CallOption) (*BackupRunsListRe
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.backupRuns.list", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5256,8 +5592,7 @@ func (c *ConnectGenerateEphemeralCertCall) Header() http.Header {
 
 func (c *ConnectGenerateEphemeralCertCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.generateephemeralcertrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.generateephemeralcertrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -5274,6 +5609,7 @@ func (c *ConnectGenerateEphemeralCertCall) doRequest(alt string) (*http.Response
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.connect.generateEphemeral", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5309,9 +5645,11 @@ func (c *ConnectGenerateEphemeralCertCall) Do(opts ...googleapi.CallOption) (*Ge
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.connect.generateEphemeral", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5379,12 +5717,11 @@ func (c *ConnectGetCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/connectSettings")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5393,6 +5730,7 @@ func (c *ConnectGetCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.connect.get", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5428,9 +5766,11 @@ func (c *ConnectGetCall) Do(opts ...googleapi.CallOption) (*ConnectSettings, err
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.connect.get", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5482,12 +5822,11 @@ func (c *DatabasesDeleteCall) Header() http.Header {
 
 func (c *DatabasesDeleteCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/databases/{database}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("DELETE", urls, body)
+	req, err := http.NewRequest("DELETE", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5497,6 +5836,7 @@ func (c *DatabasesDeleteCall) doRequest(alt string) (*http.Response, error) {
 		"instance": c.instance,
 		"database": c.database,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.databases.delete", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5531,9 +5871,11 @@ func (c *DatabasesDeleteCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.databases.delete", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5598,12 +5940,11 @@ func (c *DatabasesGetCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/databases/{database}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5613,6 +5954,7 @@ func (c *DatabasesGetCall) doRequest(alt string) (*http.Response, error) {
 		"instance": c.instance,
 		"database": c.database,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.databases.get", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5647,9 +5989,11 @@ func (c *DatabasesGetCall) Do(opts ...googleapi.CallOption) (*Database, error) {
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.databases.get", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5702,8 +6046,7 @@ func (c *DatabasesInsertCall) Header() http.Header {
 
 func (c *DatabasesInsertCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.database)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.database)
 	if err != nil {
 		return nil, err
 	}
@@ -5720,6 +6063,7 @@ func (c *DatabasesInsertCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.databases.insert", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5754,9 +6098,11 @@ func (c *DatabasesInsertCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.databases.insert", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5817,12 +6163,11 @@ func (c *DatabasesListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/databases")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5831,6 +6176,7 @@ func (c *DatabasesListCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.databases.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5866,9 +6212,11 @@ func (c *DatabasesListCall) Do(opts ...googleapi.CallOption) (*DatabasesListResp
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.databases.list", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -5923,8 +6271,7 @@ func (c *DatabasesPatchCall) Header() http.Header {
 
 func (c *DatabasesPatchCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.database2)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.database2)
 	if err != nil {
 		return nil, err
 	}
@@ -5942,6 +6289,7 @@ func (c *DatabasesPatchCall) doRequest(alt string) (*http.Response, error) {
 		"instance": c.instance,
 		"database": c.database,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.databases.patch", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -5976,9 +6324,11 @@ func (c *DatabasesPatchCall) Do(opts ...googleapi.CallOption) (*Operation, error
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.databases.patch", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6033,8 +6383,7 @@ func (c *DatabasesUpdateCall) Header() http.Header {
 
 func (c *DatabasesUpdateCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.database2)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.database2)
 	if err != nil {
 		return nil, err
 	}
@@ -6052,6 +6401,7 @@ func (c *DatabasesUpdateCall) doRequest(alt string) (*http.Response, error) {
 		"instance": c.instance,
 		"database": c.database,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.databases.update", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6086,9 +6436,11 @@ func (c *DatabasesUpdateCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.databases.update", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6150,16 +6502,16 @@ func (c *FlagsListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/flags")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header = reqHeaders
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.flags.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6195,9 +6547,240 @@ func (c *FlagsListCall) Do(opts ...googleapi.CallOption) (*FlagsListResponse, er
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.flags.list", "response", internallog.HTTPResponse(res, b))
+	return ret, nil
+}
+
+type InstancesListServerCertificatesCall struct {
+	s            *Service
+	project      string
+	instance     string
+	urlParams_   gensupport.URLParams
+	ifNoneMatch_ string
+	ctx_         context.Context
+	header_      http.Header
+}
+
+// ListServerCertificates: Lists all versions of server certificates and
+// certificate authorities (CAs) for the specified instance. There can be up to
+// three sets of certs listed: the certificate that is currently in use, a
+// future that has been added but not yet used to sign a certificate, and a
+// certificate that has been rotated out. For instances not using Certificate
+// Authority Service (CAS) server CA, use ListServerCas instead.
+//
+// - instance: Cloud SQL instance ID. This does not include the project ID.
+// - project: Project ID of the project that contains the instance.
+func (r *InstancesService) ListServerCertificates(project string, instance string) *InstancesListServerCertificatesCall {
+	c := &InstancesListServerCertificatesCall{s: r.s, urlParams_: make(gensupport.URLParams)}
+	c.project = project
+	c.instance = instance
+	return c
+}
+
+// Fields allows partial responses to be retrieved. See
+// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse for more
+// details.
+func (c *InstancesListServerCertificatesCall) Fields(s ...googleapi.Field) *InstancesListServerCertificatesCall {
+	c.urlParams_.Set("fields", googleapi.CombineFields(s))
+	return c
+}
+
+// IfNoneMatch sets an optional parameter which makes the operation fail if the
+// object's ETag matches the given value. This is useful for getting updates
+// only after the object has changed since the last request.
+func (c *InstancesListServerCertificatesCall) IfNoneMatch(entityTag string) *InstancesListServerCertificatesCall {
+	c.ifNoneMatch_ = entityTag
+	return c
+}
+
+// Context sets the context to be used in this call's Do method.
+func (c *InstancesListServerCertificatesCall) Context(ctx context.Context) *InstancesListServerCertificatesCall {
+	c.ctx_ = ctx
+	return c
+}
+
+// Header returns a http.Header that can be modified by the caller to add
+// headers to the request.
+func (c *InstancesListServerCertificatesCall) Header() http.Header {
+	if c.header_ == nil {
+		c.header_ = make(http.Header)
+	}
+	return c.header_
+}
+
+func (c *InstancesListServerCertificatesCall) doRequest(alt string) (*http.Response, error) {
+	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
+	if c.ifNoneMatch_ != "" {
+		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
+	}
+	c.urlParams_.Set("alt", alt)
+	c.urlParams_.Set("prettyPrint", "false")
+	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/listServerCertificates")
+	urls += "?" + c.urlParams_.Encode()
+	req, err := http.NewRequest("GET", urls, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header = reqHeaders
+	googleapi.Expand(req.URL, map[string]string{
+		"project":  c.project,
+		"instance": c.instance,
+	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.ListServerCertificates", "request", internallog.HTTPRequest(req, nil))
+	return gensupport.SendRequest(c.ctx_, c.s.client, req)
+}
+
+// Do executes the "sql.instances.ListServerCertificates" call.
+// Any non-2xx status code is an error. Response headers are in either
+// *InstancesListServerCertificatesResponse.ServerResponse.Header or (if a
+// response was returned at all) in error.(*googleapi.Error).Header. Use
+// googleapi.IsNotModified to check whether the returned error was because
+// http.StatusNotModified was returned.
+func (c *InstancesListServerCertificatesCall) Do(opts ...googleapi.CallOption) (*InstancesListServerCertificatesResponse, error) {
+	gensupport.SetOptions(c.urlParams_, opts...)
+	res, err := c.doRequest("json")
+	if res != nil && res.StatusCode == http.StatusNotModified {
+		if res.Body != nil {
+			res.Body.Close()
+		}
+		return nil, gensupport.WrapError(&googleapi.Error{
+			Code:   res.StatusCode,
+			Header: res.Header,
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer googleapi.CloseBody(res)
+	if err := googleapi.CheckResponse(res); err != nil {
+		return nil, gensupport.WrapError(err)
+	}
+	ret := &InstancesListServerCertificatesResponse{
+		ServerResponse: googleapi.ServerResponse{
+			Header:         res.Header,
+			HTTPStatusCode: res.StatusCode,
+		},
+	}
+	target := &ret
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
+		return nil, err
+	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.ListServerCertificates", "response", internallog.HTTPResponse(res, b))
+	return ret, nil
+}
+
+type InstancesRotateServerCertificateCall struct {
+	s                                       *Service
+	project                                 string
+	instance                                string
+	instancesrotateservercertificaterequest *InstancesRotateServerCertificateRequest
+	urlParams_                              gensupport.URLParams
+	ctx_                                    context.Context
+	header_                                 http.Header
+}
+
+// RotateServerCertificate: Rotates the server certificate version to one
+// previously added with the addServerCertificate method. For instances not
+// using Certificate Authority Service (CAS) server CA, use RotateServerCa
+// instead.
+//
+// - instance: Cloud SQL instance ID. This does not include the project ID.
+// - project: Project ID of the project that contains the instance.
+func (r *InstancesService) RotateServerCertificate(project string, instance string, instancesrotateservercertificaterequest *InstancesRotateServerCertificateRequest) *InstancesRotateServerCertificateCall {
+	c := &InstancesRotateServerCertificateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
+	c.project = project
+	c.instance = instance
+	c.instancesrotateservercertificaterequest = instancesrotateservercertificaterequest
+	return c
+}
+
+// Fields allows partial responses to be retrieved. See
+// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse for more
+// details.
+func (c *InstancesRotateServerCertificateCall) Fields(s ...googleapi.Field) *InstancesRotateServerCertificateCall {
+	c.urlParams_.Set("fields", googleapi.CombineFields(s))
+	return c
+}
+
+// Context sets the context to be used in this call's Do method.
+func (c *InstancesRotateServerCertificateCall) Context(ctx context.Context) *InstancesRotateServerCertificateCall {
+	c.ctx_ = ctx
+	return c
+}
+
+// Header returns a http.Header that can be modified by the caller to add
+// headers to the request.
+func (c *InstancesRotateServerCertificateCall) Header() http.Header {
+	if c.header_ == nil {
+		c.header_ = make(http.Header)
+	}
+	return c.header_
+}
+
+func (c *InstancesRotateServerCertificateCall) doRequest(alt string) (*http.Response, error) {
+	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesrotateservercertificaterequest)
+	if err != nil {
+		return nil, err
+	}
+	c.urlParams_.Set("alt", alt)
+	c.urlParams_.Set("prettyPrint", "false")
+	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/rotateServerCertificate")
+	urls += "?" + c.urlParams_.Encode()
+	req, err := http.NewRequest("POST", urls, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header = reqHeaders
+	googleapi.Expand(req.URL, map[string]string{
+		"project":  c.project,
+		"instance": c.instance,
+	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.RotateServerCertificate", "request", internallog.HTTPRequest(req, body.Bytes()))
+	return gensupport.SendRequest(c.ctx_, c.s.client, req)
+}
+
+// Do executes the "sql.instances.RotateServerCertificate" call.
+// Any non-2xx status code is an error. Response headers are in either
+// *Operation.ServerResponse.Header or (if a response was returned at all) in
+// error.(*googleapi.Error).Header. Use googleapi.IsNotModified to check
+// whether the returned error was because http.StatusNotModified was returned.
+func (c *InstancesRotateServerCertificateCall) Do(opts ...googleapi.CallOption) (*Operation, error) {
+	gensupport.SetOptions(c.urlParams_, opts...)
+	res, err := c.doRequest("json")
+	if res != nil && res.StatusCode == http.StatusNotModified {
+		if res.Body != nil {
+			res.Body.Close()
+		}
+		return nil, gensupport.WrapError(&googleapi.Error{
+			Code:   res.StatusCode,
+			Header: res.Header,
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer googleapi.CloseBody(res)
+	if err := googleapi.CheckResponse(res); err != nil {
+		return nil, gensupport.WrapError(err)
+	}
+	ret := &Operation{
+		ServerResponse: googleapi.ServerResponse{
+			Header:         res.Header,
+			HTTPStatusCode: res.StatusCode,
+		},
+	}
+	target := &ret
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
+		return nil, err
+	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.RotateServerCertificate", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6253,8 +6836,7 @@ func (c *InstancesAcquireSsrsLeaseCall) Header() http.Header {
 
 func (c *InstancesAcquireSsrsLeaseCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesacquiressrsleaserequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesacquiressrsleaserequest)
 	if err != nil {
 		return nil, err
 	}
@@ -6271,6 +6853,7 @@ func (c *InstancesAcquireSsrsLeaseCall) doRequest(alt string) (*http.Response, e
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.acquireSsrsLease", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6306,9 +6889,11 @@ func (c *InstancesAcquireSsrsLeaseCall) Do(opts ...googleapi.CallOption) (*SqlIn
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.acquireSsrsLease", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6325,7 +6910,9 @@ type InstancesAddServerCaCall struct {
 // specified instance. Required to prepare for a certificate rotation. If a CA
 // version was previously added but never used in a certificate rotation, this
 // operation replaces that version. There cannot be more than one CA version
-// waiting to be rotated in.
+// waiting to be rotated in. For instances that have enabled Certificate
+// Authority Service (CAS) based server CA, use AddServerCertificate to add a
+// new server certificate.
 //
 // - instance: Cloud SQL instance ID. This does not include the project ID.
 // - project: Project ID of the project that contains the instance.
@@ -6361,12 +6948,11 @@ func (c *InstancesAddServerCaCall) Header() http.Header {
 
 func (c *InstancesAddServerCaCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/addServerCa")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -6375,6 +6961,7 @@ func (c *InstancesAddServerCaCall) doRequest(alt string) (*http.Response, error)
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.addServerCa", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6409,9 +6996,118 @@ func (c *InstancesAddServerCaCall) Do(opts ...googleapi.CallOption) (*Operation,
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.addServerCa", "response", internallog.HTTPResponse(res, b))
+	return ret, nil
+}
+
+type InstancesAddServerCertificateCall struct {
+	s          *Service
+	project    string
+	instance   string
+	urlParams_ gensupport.URLParams
+	ctx_       context.Context
+	header_    http.Header
+}
+
+// AddServerCertificate: Add a new trusted server certificate version for the
+// specified instance using Certificate Authority Service (CAS) server CA.
+// Required to prepare for a certificate rotation. If a server certificate
+// version was previously added but never used in a certificate rotation, this
+// operation replaces that version. There cannot be more than one certificate
+// version waiting to be rotated in. For instances not using CAS server CA, use
+// AddServerCa instead.
+//
+// - instance: Cloud SQL instance ID. This does not include the project ID.
+// - project: Project ID of the project that contains the instance.
+func (r *InstancesService) AddServerCertificate(project string, instance string) *InstancesAddServerCertificateCall {
+	c := &InstancesAddServerCertificateCall{s: r.s, urlParams_: make(gensupport.URLParams)}
+	c.project = project
+	c.instance = instance
+	return c
+}
+
+// Fields allows partial responses to be retrieved. See
+// https://developers.google.com/gdata/docs/2.0/basics#PartialResponse for more
+// details.
+func (c *InstancesAddServerCertificateCall) Fields(s ...googleapi.Field) *InstancesAddServerCertificateCall {
+	c.urlParams_.Set("fields", googleapi.CombineFields(s))
+	return c
+}
+
+// Context sets the context to be used in this call's Do method.
+func (c *InstancesAddServerCertificateCall) Context(ctx context.Context) *InstancesAddServerCertificateCall {
+	c.ctx_ = ctx
+	return c
+}
+
+// Header returns a http.Header that can be modified by the caller to add
+// headers to the request.
+func (c *InstancesAddServerCertificateCall) Header() http.Header {
+	if c.header_ == nil {
+		c.header_ = make(http.Header)
+	}
+	return c.header_
+}
+
+func (c *InstancesAddServerCertificateCall) doRequest(alt string) (*http.Response, error) {
+	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
+	c.urlParams_.Set("alt", alt)
+	c.urlParams_.Set("prettyPrint", "false")
+	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/addServerCertificate")
+	urls += "?" + c.urlParams_.Encode()
+	req, err := http.NewRequest("POST", urls, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header = reqHeaders
+	googleapi.Expand(req.URL, map[string]string{
+		"project":  c.project,
+		"instance": c.instance,
+	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.addServerCertificate", "request", internallog.HTTPRequest(req, nil))
+	return gensupport.SendRequest(c.ctx_, c.s.client, req)
+}
+
+// Do executes the "sql.instances.addServerCertificate" call.
+// Any non-2xx status code is an error. Response headers are in either
+// *Operation.ServerResponse.Header or (if a response was returned at all) in
+// error.(*googleapi.Error).Header. Use googleapi.IsNotModified to check
+// whether the returned error was because http.StatusNotModified was returned.
+func (c *InstancesAddServerCertificateCall) Do(opts ...googleapi.CallOption) (*Operation, error) {
+	gensupport.SetOptions(c.urlParams_, opts...)
+	res, err := c.doRequest("json")
+	if res != nil && res.StatusCode == http.StatusNotModified {
+		if res.Body != nil {
+			res.Body.Close()
+		}
+		return nil, gensupport.WrapError(&googleapi.Error{
+			Code:   res.StatusCode,
+			Header: res.Header,
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer googleapi.CloseBody(res)
+	if err := googleapi.CheckResponse(res); err != nil {
+		return nil, gensupport.WrapError(err)
+	}
+	ret := &Operation{
+		ServerResponse: googleapi.ServerResponse{
+			Header:         res.Header,
+			HTTPStatusCode: res.StatusCode,
+		},
+	}
+	target := &ret
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
+		return nil, err
+	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.addServerCertificate", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6464,8 +7160,7 @@ func (c *InstancesCloneCall) Header() http.Header {
 
 func (c *InstancesCloneCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesclonerequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesclonerequest)
 	if err != nil {
 		return nil, err
 	}
@@ -6482,6 +7177,7 @@ func (c *InstancesCloneCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.clone", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6516,9 +7212,11 @@ func (c *InstancesCloneCall) Do(opts ...googleapi.CallOption) (*Operation, error
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.clone", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6568,12 +7266,11 @@ func (c *InstancesDeleteCall) Header() http.Header {
 
 func (c *InstancesDeleteCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("DELETE", urls, body)
+	req, err := http.NewRequest("DELETE", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -6582,6 +7279,7 @@ func (c *InstancesDeleteCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.delete", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6616,9 +7314,11 @@ func (c *InstancesDeleteCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.delete", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6670,8 +7370,7 @@ func (c *InstancesDemoteCall) Header() http.Header {
 
 func (c *InstancesDemoteCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesdemoterequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesdemoterequest)
 	if err != nil {
 		return nil, err
 	}
@@ -6688,6 +7387,7 @@ func (c *InstancesDemoteCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.demote", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6722,9 +7422,11 @@ func (c *InstancesDemoteCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.demote", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6776,8 +7478,7 @@ func (c *InstancesDemoteMasterCall) Header() http.Header {
 
 func (c *InstancesDemoteMasterCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesdemotemasterrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesdemotemasterrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -6794,6 +7495,7 @@ func (c *InstancesDemoteMasterCall) doRequest(alt string) (*http.Response, error
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.demoteMaster", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6828,9 +7530,11 @@ func (c *InstancesDemoteMasterCall) Do(opts ...googleapi.CallOption) (*Operation
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.demoteMaster", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6883,8 +7587,7 @@ func (c *InstancesExportCall) Header() http.Header {
 
 func (c *InstancesExportCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesexportrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesexportrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -6901,6 +7604,7 @@ func (c *InstancesExportCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.export", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -6935,9 +7639,11 @@ func (c *InstancesExportCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.export", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -6994,8 +7700,7 @@ func (c *InstancesFailoverCall) Header() http.Header {
 
 func (c *InstancesFailoverCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesfailoverrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesfailoverrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -7012,6 +7717,7 @@ func (c *InstancesFailoverCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.failover", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7046,9 +7752,11 @@ func (c *InstancesFailoverCall) Do(opts ...googleapi.CallOption) (*Operation, er
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.failover", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7109,12 +7817,11 @@ func (c *InstancesGetCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -7123,6 +7830,7 @@ func (c *InstancesGetCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.get", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7158,9 +7866,11 @@ func (c *InstancesGetCall) Do(opts ...googleapi.CallOption) (*DatabaseInstance, 
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.get", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7212,8 +7922,7 @@ func (c *InstancesImportCall) Header() http.Header {
 
 func (c *InstancesImportCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesimportrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesimportrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -7230,6 +7939,7 @@ func (c *InstancesImportCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.import", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7264,9 +7974,11 @@ func (c *InstancesImportCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.import", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7315,8 +8027,7 @@ func (c *InstancesInsertCall) Header() http.Header {
 
 func (c *InstancesInsertCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.databaseinstance)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.databaseinstance)
 	if err != nil {
 		return nil, err
 	}
@@ -7332,6 +8043,7 @@ func (c *InstancesInsertCall) doRequest(alt string) (*http.Response, error) {
 	googleapi.Expand(req.URL, map[string]string{
 		"project": c.project,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.insert", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7366,9 +8078,11 @@ func (c *InstancesInsertCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.insert", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7455,12 +8169,11 @@ func (c *InstancesListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -7468,6 +8181,7 @@ func (c *InstancesListCall) doRequest(alt string) (*http.Response, error) {
 	googleapi.Expand(req.URL, map[string]string{
 		"project": c.project,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7503,9 +8217,11 @@ func (c *InstancesListCall) Do(opts ...googleapi.CallOption) (*InstancesListResp
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.list", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7591,12 +8307,11 @@ func (c *InstancesListServerCasCall) doRequest(alt string) (*http.Response, erro
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/listServerCas")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -7605,6 +8320,7 @@ func (c *InstancesListServerCasCall) doRequest(alt string) (*http.Response, erro
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.listServerCas", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7640,9 +8356,11 @@ func (c *InstancesListServerCasCall) Do(opts ...googleapi.CallOption) (*Instance
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.listServerCas", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7695,8 +8413,7 @@ func (c *InstancesPatchCall) Header() http.Header {
 
 func (c *InstancesPatchCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.databaseinstance)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.databaseinstance)
 	if err != nil {
 		return nil, err
 	}
@@ -7713,6 +8430,7 @@ func (c *InstancesPatchCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.patch", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7747,9 +8465,11 @@ func (c *InstancesPatchCall) Do(opts ...googleapi.CallOption) (*Operation, error
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.patch", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7776,12 +8496,11 @@ func (r *InstancesService) PromoteReplica(project string, instance string) *Inst
 }
 
 // Failover sets the optional parameter "failover": Set to true to invoke a
-// replica failover to the designated DR replica. As part of replica failover,
-// the promote operation attempts to add the original primary instance as a
-// replica of the promoted DR replica when the original primary instance comes
-// back online. If set to false or not specified, then the original primary
-// instance becomes an independent Cloud SQL primary instance. Only applicable
-// to MySQL.
+// replica failover to the DR replica. As part of replica failover, the promote
+// operation attempts to add the original primary instance as a replica of the
+// promoted DR replica when the original primary instance comes back online. If
+// set to false or not specified, then the original primary instance becomes an
+// independent Cloud SQL primary instance.
 func (c *InstancesPromoteReplicaCall) Failover(failover bool) *InstancesPromoteReplicaCall {
 	c.urlParams_.Set("failover", fmt.Sprint(failover))
 	return c
@@ -7812,12 +8531,11 @@ func (c *InstancesPromoteReplicaCall) Header() http.Header {
 
 func (c *InstancesPromoteReplicaCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/promoteReplica")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -7826,6 +8544,7 @@ func (c *InstancesPromoteReplicaCall) doRequest(alt string) (*http.Response, err
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.promoteReplica", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7860,9 +8579,11 @@ func (c *InstancesPromoteReplicaCall) Do(opts ...googleapi.CallOption) (*Operati
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.promoteReplica", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -7913,8 +8634,7 @@ func (c *InstancesReencryptCall) Header() http.Header {
 
 func (c *InstancesReencryptCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesreencryptrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesreencryptrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -7931,6 +8651,7 @@ func (c *InstancesReencryptCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.reencrypt", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -7965,9 +8686,11 @@ func (c *InstancesReencryptCall) Do(opts ...googleapi.CallOption) (*Operation, e
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.reencrypt", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8021,12 +8744,11 @@ func (c *InstancesReleaseSsrsLeaseCall) Header() http.Header {
 
 func (c *InstancesReleaseSsrsLeaseCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/releaseSsrsLease")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8035,6 +8757,7 @@ func (c *InstancesReleaseSsrsLeaseCall) doRequest(alt string) (*http.Response, e
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.releaseSsrsLease", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8070,9 +8793,11 @@ func (c *InstancesReleaseSsrsLeaseCall) Do(opts ...googleapi.CallOption) (*SqlIn
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.releaseSsrsLease", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8122,12 +8847,11 @@ func (c *InstancesResetSslConfigCall) Header() http.Header {
 
 func (c *InstancesResetSslConfigCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/resetSslConfig")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8136,6 +8860,7 @@ func (c *InstancesResetSslConfigCall) doRequest(alt string) (*http.Response, err
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.resetSslConfig", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8170,9 +8895,11 @@ func (c *InstancesResetSslConfigCall) Do(opts ...googleapi.CallOption) (*Operati
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.resetSslConfig", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8222,12 +8949,11 @@ func (c *InstancesRestartCall) Header() http.Header {
 
 func (c *InstancesRestartCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/restart")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8236,6 +8962,7 @@ func (c *InstancesRestartCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.restart", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8270,9 +8997,11 @@ func (c *InstancesRestartCall) Do(opts ...googleapi.CallOption) (*Operation, err
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.restart", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8324,8 +9053,7 @@ func (c *InstancesRestoreBackupCall) Header() http.Header {
 
 func (c *InstancesRestoreBackupCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesrestorebackuprequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesrestorebackuprequest)
 	if err != nil {
 		return nil, err
 	}
@@ -8342,6 +9070,7 @@ func (c *InstancesRestoreBackupCall) doRequest(alt string) (*http.Response, erro
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.restoreBackup", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8376,9 +9105,11 @@ func (c *InstancesRestoreBackupCall) Do(opts ...googleapi.CallOption) (*Operatio
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.restoreBackup", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8394,7 +9125,9 @@ type InstancesRotateServerCaCall struct {
 
 // RotateServerCa: Rotates the server certificate to one signed by the
 // Certificate Authority (CA) version previously added with the addServerCA
-// method.
+// method. For instances that have enabled Certificate Authority Service (CAS)
+// based server CA, use RotateServerCertificate to rotate the server
+// certificate.
 //
 // - instance: Cloud SQL instance ID. This does not include the project ID.
 // - project: Project ID of the project that contains the instance.
@@ -8431,8 +9164,7 @@ func (c *InstancesRotateServerCaCall) Header() http.Header {
 
 func (c *InstancesRotateServerCaCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancesrotateservercarequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancesrotateservercarequest)
 	if err != nil {
 		return nil, err
 	}
@@ -8449,6 +9181,7 @@ func (c *InstancesRotateServerCaCall) doRequest(alt string) (*http.Response, err
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.rotateServerCa", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8483,9 +9216,11 @@ func (c *InstancesRotateServerCaCall) Do(opts ...googleapi.CallOption) (*Operati
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.rotateServerCa", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8534,12 +9269,11 @@ func (c *InstancesStartReplicaCall) Header() http.Header {
 
 func (c *InstancesStartReplicaCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/startReplica")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8548,6 +9282,7 @@ func (c *InstancesStartReplicaCall) doRequest(alt string) (*http.Response, error
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.startReplica", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8582,9 +9317,11 @@ func (c *InstancesStartReplicaCall) Do(opts ...googleapi.CallOption) (*Operation
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.startReplica", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8633,12 +9370,11 @@ func (c *InstancesStopReplicaCall) Header() http.Header {
 
 func (c *InstancesStopReplicaCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/stopReplica")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8647,6 +9383,7 @@ func (c *InstancesStopReplicaCall) doRequest(alt string) (*http.Response, error)
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.stopReplica", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8681,9 +9418,11 @@ func (c *InstancesStopReplicaCall) Do(opts ...googleapi.CallOption) (*Operation,
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.stopReplica", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8696,8 +9435,8 @@ type InstancesSwitchoverCall struct {
 	header_    http.Header
 }
 
-// Switchover: Switches over from the primary instance to the designated DR
-// replica instance.
+// Switchover: Switches over from the primary instance to the DR replica
+// instance.
 //
 // - instance: Cloud SQL read replica instance name.
 // - project: ID of the project that contains the replica.
@@ -8708,10 +9447,10 @@ func (r *InstancesService) Switchover(project string, instance string) *Instance
 	return c
 }
 
-// DbTimeout sets the optional parameter "dbTimeout": (MySQL only) Cloud SQL
-// instance operations timeout, which is a sum of all database operations.
-// Default value is 10 minutes and can be modified to a maximum value of 24
-// hours.
+// DbTimeout sets the optional parameter "dbTimeout": (MySQL and PostgreSQL
+// only) Cloud SQL instance operations timeout, which is a sum of all database
+// operations. Default value is 10 minutes and can be modified to a maximum
+// value of 24 hours.
 func (c *InstancesSwitchoverCall) DbTimeout(dbTimeout string) *InstancesSwitchoverCall {
 	c.urlParams_.Set("dbTimeout", dbTimeout)
 	return c
@@ -8742,12 +9481,11 @@ func (c *InstancesSwitchoverCall) Header() http.Header {
 
 func (c *InstancesSwitchoverCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/switchover")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8756,6 +9494,7 @@ func (c *InstancesSwitchoverCall) doRequest(alt string) (*http.Response, error) 
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.switchover", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8790,9 +9529,11 @@ func (c *InstancesSwitchoverCall) Do(opts ...googleapi.CallOption) (*Operation, 
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.switchover", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8843,8 +9584,7 @@ func (c *InstancesTruncateLogCall) Header() http.Header {
 
 func (c *InstancesTruncateLogCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.instancestruncatelogrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.instancestruncatelogrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -8861,6 +9601,7 @@ func (c *InstancesTruncateLogCall) doRequest(alt string) (*http.Response, error)
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.truncateLog", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -8895,9 +9636,11 @@ func (c *InstancesTruncateLogCall) Do(opts ...googleapi.CallOption) (*Operation,
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.truncateLog", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -8949,8 +9692,7 @@ func (c *InstancesUpdateCall) Header() http.Header {
 
 func (c *InstancesUpdateCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.databaseinstance)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.databaseinstance)
 	if err != nil {
 		return nil, err
 	}
@@ -8967,6 +9709,7 @@ func (c *InstancesUpdateCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.instances.update", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9001,9 +9744,11 @@ func (c *InstancesUpdateCall) Do(opts ...googleapi.CallOption) (*Operation, erro
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.instances.update", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9053,12 +9798,11 @@ func (c *OperationsCancelCall) Header() http.Header {
 
 func (c *OperationsCancelCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/operations/{operation}/cancel")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("POST", urls, body)
+	req, err := http.NewRequest("POST", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9067,6 +9811,7 @@ func (c *OperationsCancelCall) doRequest(alt string) (*http.Response, error) {
 		"project":   c.project,
 		"operation": c.operation,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.operations.cancel", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9101,9 +9846,11 @@ func (c *OperationsCancelCall) Do(opts ...googleapi.CallOption) (*Empty, error) 
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.operations.cancel", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9164,12 +9911,11 @@ func (c *OperationsGetCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/operations/{operation}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9178,6 +9924,7 @@ func (c *OperationsGetCall) doRequest(alt string) (*http.Response, error) {
 		"project":   c.project,
 		"operation": c.operation,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.operations.get", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9212,9 +9959,11 @@ func (c *OperationsGetCall) Do(opts ...googleapi.CallOption) (*Operation, error)
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.operations.get", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9294,12 +10043,11 @@ func (c *OperationsListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/operations")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9307,6 +10055,7 @@ func (c *OperationsListCall) doRequest(alt string) (*http.Response, error) {
 	googleapi.Expand(req.URL, map[string]string{
 		"project": c.project,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.operations.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9342,9 +10091,11 @@ func (c *OperationsListCall) Do(opts ...googleapi.CallOption) (*OperationsListRe
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.operations.list", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9426,12 +10177,11 @@ func (c *ProjectsInstancesGetDiskShrinkConfigCall) doRequest(alt string) (*http.
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/getDiskShrinkConfig")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9440,6 +10190,7 @@ func (c *ProjectsInstancesGetDiskShrinkConfigCall) doRequest(alt string) (*http.
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.projects.instances.getDiskShrinkConfig", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9475,9 +10226,11 @@ func (c *ProjectsInstancesGetDiskShrinkConfigCall) Do(opts ...googleapi.CallOpti
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.projects.instances.getDiskShrinkConfig", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9538,12 +10291,11 @@ func (c *ProjectsInstancesGetLatestRecoveryTimeCall) doRequest(alt string) (*htt
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/getLatestRecoveryTime")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9552,6 +10304,7 @@ func (c *ProjectsInstancesGetLatestRecoveryTimeCall) doRequest(alt string) (*htt
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.projects.instances.getLatestRecoveryTime", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9587,9 +10340,11 @@ func (c *ProjectsInstancesGetLatestRecoveryTimeCall) Do(opts ...googleapi.CallOp
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.projects.instances.getLatestRecoveryTime", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9640,8 +10395,7 @@ func (c *ProjectsInstancesPerformDiskShrinkCall) Header() http.Header {
 
 func (c *ProjectsInstancesPerformDiskShrinkCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.performdiskshrinkcontext)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.performdiskshrinkcontext)
 	if err != nil {
 		return nil, err
 	}
@@ -9658,6 +10412,7 @@ func (c *ProjectsInstancesPerformDiskShrinkCall) doRequest(alt string) (*http.Re
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.projects.instances.performDiskShrink", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9692,9 +10447,11 @@ func (c *ProjectsInstancesPerformDiskShrinkCall) Do(opts ...googleapi.CallOption
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.projects.instances.performDiskShrink", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9745,8 +10502,7 @@ func (c *ProjectsInstancesRescheduleMaintenanceCall) Header() http.Header {
 
 func (c *ProjectsInstancesRescheduleMaintenanceCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.sqlinstancesreschedulemaintenancerequestbody)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.sqlinstancesreschedulemaintenancerequestbody)
 	if err != nil {
 		return nil, err
 	}
@@ -9763,6 +10519,7 @@ func (c *ProjectsInstancesRescheduleMaintenanceCall) doRequest(alt string) (*htt
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.projects.instances.rescheduleMaintenance", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9797,9 +10554,11 @@ func (c *ProjectsInstancesRescheduleMaintenanceCall) Do(opts ...googleapi.CallOp
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.projects.instances.rescheduleMaintenance", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9850,8 +10609,7 @@ func (c *ProjectsInstancesResetReplicaSizeCall) Header() http.Header {
 
 func (c *ProjectsInstancesResetReplicaSizeCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.sqlinstancesresetreplicasizerequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.sqlinstancesresetreplicasizerequest)
 	if err != nil {
 		return nil, err
 	}
@@ -9868,6 +10626,7 @@ func (c *ProjectsInstancesResetReplicaSizeCall) doRequest(alt string) (*http.Res
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.projects.instances.resetReplicaSize", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -9902,9 +10661,11 @@ func (c *ProjectsInstancesResetReplicaSizeCall) Do(opts ...googleapi.CallOption)
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.projects.instances.resetReplicaSize", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -9955,8 +10716,7 @@ func (c *ProjectsInstancesStartExternalSyncCall) Header() http.Header {
 
 func (c *ProjectsInstancesStartExternalSyncCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.sqlinstancesstartexternalsyncrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.sqlinstancesstartexternalsyncrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -9973,6 +10733,7 @@ func (c *ProjectsInstancesStartExternalSyncCall) doRequest(alt string) (*http.Re
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.projects.instances.startExternalSync", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10007,9 +10768,11 @@ func (c *ProjectsInstancesStartExternalSyncCall) Do(opts ...googleapi.CallOption
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.projects.instances.startExternalSync", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10061,8 +10824,7 @@ func (c *ProjectsInstancesVerifyExternalSyncSettingsCall) Header() http.Header {
 
 func (c *ProjectsInstancesVerifyExternalSyncSettingsCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.sqlinstancesverifyexternalsyncsettingsrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.sqlinstancesverifyexternalsyncsettingsrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -10079,6 +10841,7 @@ func (c *ProjectsInstancesVerifyExternalSyncSettingsCall) doRequest(alt string) 
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.projects.instances.verifyExternalSyncSettings", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10114,9 +10877,11 @@ func (c *ProjectsInstancesVerifyExternalSyncSettingsCall) Do(opts ...googleapi.C
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.projects.instances.verifyExternalSyncSettings", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10170,8 +10935,7 @@ func (c *SslCertsCreateEphemeralCall) Header() http.Header {
 
 func (c *SslCertsCreateEphemeralCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.sslcertscreateephemeralrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.sslcertscreateephemeralrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -10188,6 +10952,7 @@ func (c *SslCertsCreateEphemeralCall) doRequest(alt string) (*http.Response, err
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.sslCerts.createEphemeral", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10222,9 +10987,11 @@ func (c *SslCertsCreateEphemeralCall) Do(opts ...googleapi.CallOption) (*SslCert
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.sslCerts.createEphemeral", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10277,12 +11044,11 @@ func (c *SslCertsDeleteCall) Header() http.Header {
 
 func (c *SslCertsDeleteCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/sslCerts/{sha1Fingerprint}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("DELETE", urls, body)
+	req, err := http.NewRequest("DELETE", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10292,6 +11058,7 @@ func (c *SslCertsDeleteCall) doRequest(alt string) (*http.Response, error) {
 		"instance":        c.instance,
 		"sha1Fingerprint": c.sha1Fingerprint,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.sslCerts.delete", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10326,9 +11093,11 @@ func (c *SslCertsDeleteCall) Do(opts ...googleapi.CallOption) (*Operation, error
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.sslCerts.delete", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10394,12 +11163,11 @@ func (c *SslCertsGetCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/sslCerts/{sha1Fingerprint}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10409,6 +11177,7 @@ func (c *SslCertsGetCall) doRequest(alt string) (*http.Response, error) {
 		"instance":        c.instance,
 		"sha1Fingerprint": c.sha1Fingerprint,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.sslCerts.get", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10443,9 +11212,11 @@ func (c *SslCertsGetCall) Do(opts ...googleapi.CallOption) (*SslCert, error) {
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.sslCerts.get", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10498,8 +11269,7 @@ func (c *SslCertsInsertCall) Header() http.Header {
 
 func (c *SslCertsInsertCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.sslcertsinsertrequest)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.sslcertsinsertrequest)
 	if err != nil {
 		return nil, err
 	}
@@ -10516,6 +11286,7 @@ func (c *SslCertsInsertCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.sslCerts.insert", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10551,9 +11322,11 @@ func (c *SslCertsInsertCall) Do(opts ...googleapi.CallOption) (*SslCertsInsertRe
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.sslCerts.insert", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10614,12 +11387,11 @@ func (c *SslCertsListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/sslCerts")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10628,6 +11400,7 @@ func (c *SslCertsListCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.sslCerts.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10663,9 +11436,11 @@ func (c *SslCertsListCall) Do(opts ...googleapi.CallOption) (*SslCertsListRespon
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.sslCerts.list", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10724,12 +11499,11 @@ func (c *TiersListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/tiers")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10737,6 +11511,7 @@ func (c *TiersListCall) doRequest(alt string) (*http.Response, error) {
 	googleapi.Expand(req.URL, map[string]string{
 		"project": c.project,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.tiers.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10772,9 +11547,11 @@ func (c *TiersListCall) Do(opts ...googleapi.CallOption) (*TiersListResponse, er
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.tiers.list", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10835,12 +11612,11 @@ func (c *UsersDeleteCall) Header() http.Header {
 
 func (c *UsersDeleteCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "", c.header_)
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/users")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("DELETE", urls, body)
+	req, err := http.NewRequest("DELETE", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10849,6 +11625,7 @@ func (c *UsersDeleteCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.users.delete", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -10883,9 +11660,11 @@ func (c *UsersDeleteCall) Do(opts ...googleapi.CallOption) (*Operation, error) {
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.users.delete", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -10955,12 +11734,11 @@ func (c *UsersGetCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/users/{name}")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10970,6 +11748,7 @@ func (c *UsersGetCall) doRequest(alt string) (*http.Response, error) {
 		"instance": c.instance,
 		"name":     c.name,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.users.get", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -11004,9 +11783,11 @@ func (c *UsersGetCall) Do(opts ...googleapi.CallOption) (*User, error) {
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.users.get", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -11057,8 +11838,7 @@ func (c *UsersInsertCall) Header() http.Header {
 
 func (c *UsersInsertCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.user)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.user)
 	if err != nil {
 		return nil, err
 	}
@@ -11075,6 +11855,7 @@ func (c *UsersInsertCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.users.insert", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -11109,9 +11890,11 @@ func (c *UsersInsertCall) Do(opts ...googleapi.CallOption) (*Operation, error) {
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.users.insert", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -11172,12 +11955,11 @@ func (c *UsersListCall) doRequest(alt string) (*http.Response, error) {
 	if c.ifNoneMatch_ != "" {
 		reqHeaders.Set("If-None-Match", c.ifNoneMatch_)
 	}
-	var body io.Reader = nil
 	c.urlParams_.Set("alt", alt)
 	c.urlParams_.Set("prettyPrint", "false")
 	urls := googleapi.ResolveRelative(c.s.BasePath, "sql/v1beta4/projects/{project}/instances/{instance}/users")
 	urls += "?" + c.urlParams_.Encode()
-	req, err := http.NewRequest("GET", urls, body)
+	req, err := http.NewRequest("GET", urls, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -11186,6 +11968,7 @@ func (c *UsersListCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.users.list", "request", internallog.HTTPRequest(req, nil))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -11221,9 +12004,11 @@ func (c *UsersListCall) Do(opts ...googleapi.CallOption) (*UsersListResponse, er
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.users.list", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }
 
@@ -11286,8 +12071,7 @@ func (c *UsersUpdateCall) Header() http.Header {
 
 func (c *UsersUpdateCall) doRequest(alt string) (*http.Response, error) {
 	reqHeaders := gensupport.SetHeaders(c.s.userAgent(), "application/json", c.header_)
-	var body io.Reader = nil
-	body, err := googleapi.WithoutDataWrapper.JSONReader(c.user)
+	body, err := googleapi.WithoutDataWrapper.JSONBuffer(c.user)
 	if err != nil {
 		return nil, err
 	}
@@ -11304,6 +12088,7 @@ func (c *UsersUpdateCall) doRequest(alt string) (*http.Response, error) {
 		"project":  c.project,
 		"instance": c.instance,
 	})
+	c.s.logger.DebugContext(c.ctx_, "api request", "serviceName", apiName, "rpcName", "sql.users.update", "request", internallog.HTTPRequest(req, body.Bytes()))
 	return gensupport.SendRequest(c.ctx_, c.s.client, req)
 }
 
@@ -11338,8 +12123,10 @@ func (c *UsersUpdateCall) Do(opts ...googleapi.CallOption) (*Operation, error) {
 		},
 	}
 	target := &ret
-	if err := gensupport.DecodeResponse(target, res); err != nil {
+	b, err := gensupport.DecodeResponseBytes(target, res)
+	if err != nil {
 		return nil, err
 	}
+	c.s.logger.DebugContext(c.ctx_, "api response", "serviceName", apiName, "rpcName", "sql.users.update", "response", internallog.HTTPResponse(res, b))
 	return ret, nil
 }

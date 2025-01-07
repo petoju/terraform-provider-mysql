@@ -1,3 +1,57 @@
+# v1.5.2 (2024-12-19)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.5.1 (2024-12-06)
+
+* **Bug Fix**: **BREAKFIX**: Revert bad API release.
+
+# v1.5.0 (2024-12-03.2)
+
+* No change notes available for this release.
+
+# v1.4.25 (2024-12-02)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.24 (2024-11-18)
+
+* **Dependency Update**: Update to smithy-go v1.22.1.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.23 (2024-11-06)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.22 (2024-10-28)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.21 (2024-10-08)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.20 (2024-10-07)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.19 (2024-10-04)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.18 (2024-09-20)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.17 (2024-09-03)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.4.16 (2024-08-15)
+
+* **Dependency Update**: Bump minimum Go version to 1.21.
+* **Dependency Update**: Updated to the latest SDK module versions
+
 # v1.4.15 (2024-07-10.2)
 
 * **Dependency Update**: Updated to the latest SDK module versions

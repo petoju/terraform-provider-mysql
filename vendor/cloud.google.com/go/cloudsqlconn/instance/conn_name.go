@@ -15,6 +15,7 @@
 package instance
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 
@@ -31,12 +32,16 @@ var (
 // ConnName represents the "instance connection name", in the format
 // "project:region:name".
 type ConnName struct {
-	project string
-	region  string
-	name    string
+	project    string
+	region     string
+	name       string
+	domainName string
 }
 
 func (c *ConnName) String() string {
+	if c.domainName != "" {
+		return fmt.Sprintf("%s -> %s:%s:%s", c.domainName, c.project, c.region, c.name)
+	}
 	return fmt.Sprintf("%s:%s:%s", c.project, c.region, c.name)
 }
 
@@ -55,8 +60,24 @@ func (c *ConnName) Name() string {
 	return c.name
 }
 
+// DomainName returns the domain name for this instance
+func (c *ConnName) DomainName() string {
+	return c.domainName
+}
+
+// HasDomainName returns the Cloud SQL domain name
+func (c *ConnName) HasDomainName() bool {
+	return c.domainName != ""
+}
+
 // ParseConnName initializes a new ConnName struct.
 func ParseConnName(cn string) (ConnName, error) {
+	return ParseConnNameWithDomainName(cn, "")
+}
+
+// ParseConnNameWithDomainName initializes a new ConnName struct,
+// also setting the domain name.
+func ParseConnNameWithDomainName(cn string, dn string) (ConnName, error) {
 	b := []byte(cn)
 	m := connNameRegex.FindSubmatch(b)
 	if m == nil {
@@ -68,9 +89,20 @@ func ParseConnName(cn string) (ConnName, error) {
 	}
 
 	c := ConnName{
-		project: string(m[1]),
-		region:  string(m[3]),
-		name:    string(m[4]),
+		project:    string(m[1]),
+		region:     string(m[3]),
+		name:       string(m[4]),
+		domainName: dn,
 	}
 	return c, nil
+}
+
+// ConnectionNameResolver resolves the connection name string into a valid
+// instance name. This allows an application to replace the default
+// resolver with a custom implementation.
+type ConnectionNameResolver interface {
+	// Resolve accepts a name, and returns a ConnName with the instance
+	// connection string for the name. If the name cannot be resolved, returns
+	// an error.
+	Resolve(ctx context.Context, name string) (ConnName, error)
 }

@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.13.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.13.1...v1.13.2) (2024-12-10)
+
+
+### Bug Fixes
+
+* bump dependencies to latest ([#893](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/893)) ([4467ed4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4467ed4e8456c453fd5b616d02eeaeed41d5d921))
+
+## [1.13.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.13.0...v1.13.1) (2024-11-20)
+
+
+### Bug Fixes
+
+* update dependencies to latest ([#884](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/884)) ([dc85de5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/dc85de51bda5eb7d5c28b691dd847a4d1e5ef953))
+
+## [1.13.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.12.1...v1.13.0) (2024-10-23)
+
+
+### Features
+
+* Automatically reset connection when the DNS record changes. ([#868](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/868)) ([4d7abd8](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4d7abd877edf5fba3173b69e14181b6ddf911b24))
+
+
+### Bug Fixes
+
+* update bytes_sent and bytes_received to use Sum ([#874](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/874)) ([73b6f38](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/73b6f3860ef28dedd995a41b74b5f12168d3ff06))
+
+## [1.12.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.12.0...v1.12.1) (2024-09-19)
+
+
+### Bug Fixes
+
+* update dependencies to latest versions ([#872](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/872)) ([4eed622](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/4eed622e482a1fbcaecaf16124c445a0f7509e0c))
+
+## [1.12.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.11.1...v1.12.0) (2024-08-13)
+
+
+### Features
+
+* add `bytes_sent` and `bytes_received` as metrics ([#856](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/856)) ([d0e493f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/d0e493fc3859debd625e56874c4df32aeca02403))
+* add support for Go 1.23 and drop Go 1.20 ([#860](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/860)) ([8ce98e8](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/8ce98e858c236efccd5eb21a84f24c4b20f4a2cb))
+* Configure connections using DNS domain names ([#843](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/843)) ([ec6b3a0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/ec6b3a09bdfd1e13df30786e973ccecd48e9b3a6))
+* support Cloud SQL CAS instances. ([#850](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/850)) ([511fae4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/511fae491ed1101c2ce0998120291e0cb8180d40))
+
 ## [1.11.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.11.0...v1.11.1) (2024-07-10)
 
 
