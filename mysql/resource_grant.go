@@ -311,7 +311,8 @@ func (t *RoleGrant) ConflictsWithGrant(other MySQLGrant) bool {
 	if !ok {
 		return false
 	}
-	return otherTyped.GetUserOrRole() == t.GetUserOrRole()
+	// Only compare Name, since the Host is irrelevant and may not match what is returned from MySQL
+	return otherTyped.GetUserOrRole().Name == t.GetUserOrRole().Name
 }
 
 func resourceGrant() *schema.Resource {
