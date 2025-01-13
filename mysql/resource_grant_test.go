@@ -405,6 +405,27 @@ func TestAccGrant_complexRoleGrants(t *testing.T) {
 	})
 }
 
+func TestAccGrant_roleToRoleGrant(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	roleName1 := fmt.Sprintf("TFRole1-%d", rand.Intn(100))
+	roleName2 := fmt.Sprintf("TFRole2-%d", rand.Intn(100))
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGrantConfigRoleToRole(dbName, roleName1, roleName2),
+			},
+		},
+	})
+}
+
 func prepareTable(dbname string, tableName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ctx := context.Background()
@@ -845,6 +866,28 @@ func testAccGrantConfigComplexRoleGrants(user string) string {
 		grant      = true
 		privileges = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "RELOAD", "PROCESS", "REFERENCES", "INDEX", "ALTER", "SHOW DATABASES", "CREATE TEMPORARY TABLES", "LOCK TABLES", "EXECUTE", "REPLICATION SLAVE", "REPLICATION CLIENT", "CREATE VIEW", "SHOW VIEW", "CREATE ROUTINE", "ALTER ROUTINE", "CREATE USER", "EVENT", "TRIGGER"]
 	}`, user)
+}
+
+func testAccGrantConfigRoleToRole(dbName string, roleName1 string, roleName2 string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_role" "test1" {
+  name = "%s"
+}
+
+resource "mysql_role" "test2" {
+  name = "%s"
+}
+
+resource "mysql_grant" "test" {
+  role       = "${mysql_role.test1.name}"
+  database   = "${mysql_database.test.name}"
+  roles      = ["${mysql_role.test2.name}"]
+}
+`, dbName, roleName1, roleName2)
 }
 
 func prepareProcedure(dbname string, procedureName string) resource.TestCheckFunc {
