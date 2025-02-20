@@ -237,6 +237,80 @@ func TestAccUser_authConnectRetainOldPassword(t *testing.T) {
 	})
 }
 
+func TestAccUser_authConnectDiscardOldPassword(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheckSkipMariaDB(t)
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.14")
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserConfig_basic_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+			},
+			{
+				Config: testAccUserConfig_newPass_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+					testAccUserAuthValid("jdoe", "password2"),
+				),
+			},
+			{
+				Config: testAccUserConfig_deleteOldPass_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+				ExpectError: regexp.MustCompile(`.*Access denied for user 'jdoe'.*`),
+			},
+			{
+				Config: testAccUserConfig_auth_native_plaintext_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_native_plaintext_newPass_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+					testAccUserAuthValid("jdoe", "password2"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_native_plaintext_deleteOldPass_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+				ExpectError: regexp.MustCompile(`.*Access denied for user 'jdoe'.*`),
+			},
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password_newPass_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+					testAccUserAuthValid("jdoe", "password2"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password_deleteOldPass_discard_old_password,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("jdoe", "password"),
+				),
+				ExpectError: regexp.MustCompile(`.*Access denied for user 'jdoe'.*`),
+			},
+		},
+	})
+}
+
 func TestAccUser_deprecated(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -536,5 +610,101 @@ resource "mysql_user" "test" {
     auth_plugin         = "caching_sha2_password"
     plaintext_password  = "password3"
     retain_old_password = true
+}
+`
+
+const testAccUserConfig_basic_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    plaintext_password   = "password"
+    retain_old_password  = true
+    discard_old_password = true
+}
+`
+
+const testAccUserConfig_newPass_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    plaintext_password   = "password2"
+    retain_old_password  = true
+    discard_old_password = false
+}
+`
+
+const testAccUserConfig_deleteOldPass_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    plaintext_password   = "password2"
+    retain_old_password  = true
+    discard_old_password = true
+}
+`
+
+const testAccUserConfig_auth_native_plaintext_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    auth_plugin          = "mysql_native_password"
+    plaintext_password   = "password"
+    retain_old_password  = true
+    discard_old_password = true
+}
+`
+
+const testAccUserConfig_auth_native_plaintext_newPass_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    auth_plugin          = "mysql_native_password"
+    plaintext_password   = "password2"
+    retain_old_password  = true
+    discard_old_password = false
+}
+`
+
+const testAccUserConfig_auth_native_plaintext_deleteOldPass_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    auth_plugin          = "mysql_native_password"
+    plaintext_password   = "password2"
+    retain_old_password  = true
+    discard_old_password = true
+}
+`
+
+const testAccUserConfig_auth_caching_sha2_password_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    auth_plugin          = "caching_sha2_password"
+    plaintext_password   = "password"
+    retain_old_password  = true
+    discard_old_password = true
+}
+`
+
+const testAccUserConfig_auth_caching_sha2_password_newPass_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    auth_plugin          = "caching_sha2_password"
+    plaintext_password   = "password2"
+    retain_old_password  = true
+    discard_old_password = false
+}
+`
+
+const testAccUserConfig_auth_caching_sha2_password_deleteOldPass_discard_old_password = `
+resource "mysql_user" "test" {
+    user                 = "jdoe"
+    host                 = "%"
+    auth_plugin          = "caching_sha2_password"
+    plaintext_password   = "password2"
+    retain_old_password  = true
+    discard_old_password = true
 }
 `

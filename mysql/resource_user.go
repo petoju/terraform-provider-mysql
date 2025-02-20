@@ -106,11 +106,25 @@ func resourceUser() *schema.Resource {
 				Type:     schema.TypeBool,
 				Optional: true,
 			},
+
+			"discard_old_password": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 		},
 	}
 }
 
 func checkRetainCurrentPasswordSupport(ctx context.Context, meta interface{}) error {
+	ver, _ := version.NewVersion("8.0.14")
+	if getVersionFromMeta(ctx, meta).LessThan(ver) {
+		return errors.New("MySQL version must be at least 8.0.14")
+	}
+	return nil
+}
+
+func checkDiscardOldPasswordSupport(ctx context.Context, meta interface{}) error {
 	ver, _ := version.NewVersion("8.0.14")
 	if getVersionFromMeta(ctx, meta).LessThan(ver) {
 		return errors.New("MySQL version must be at least 8.0.14")
@@ -223,6 +237,14 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		}
 	}
 
+	discardOldPassword := d.Get("discard_old_password").(bool)
+	if discardOldPassword {
+		err := checkDiscardOldPasswordSupport(ctx, meta)
+		if err != nil {
+			return diag.Errorf("cannot use discard_old_password: %v", err)
+		}
+	}
+
 	log.Println("[DEBUG] Executing statement:", stmtSQL)
 	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
@@ -281,6 +303,25 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 				d.Get("host").(string),
 				authString,
 				d.Get("tls_option").(string))
+
+			log.Println("[DEBUG] Executing query:", stmtSQL)
+			_, err := db.ExecContext(ctx, stmtSQL)
+			if err != nil {
+				return diag.Errorf("failed running query: %v", err)
+			}
+		}
+	}
+
+	discardOldPassword := d.Get("discard_old_password").(bool)
+	if discardOldPassword {
+		err := checkDiscardOldPasswordSupport(ctx, meta)
+		if err != nil {
+			return diag.Errorf("cannot use discard_old_password: %v", err)
+		} else {
+			var stmtSQL string
+			stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' DISCARD OLD PASSWORD",
+				d.Get("user").(string),
+				d.Get("host").(string))
 
 			log.Println("[DEBUG] Executing query:", stmtSQL)
 			_, err := db.ExecContext(ctx, stmtSQL)
