@@ -260,7 +260,7 @@ For example: suppose you wanted to use the domain name
 
 #### Configure the connector
 
-Configure the connector as described above, replacing the conenctor ID with
+Configure the connector as described above, replacing the connector ID with
 the DNS name. 
 
 Adapting the MySQL + database/sql example above:
@@ -277,8 +277,7 @@ import (
 
 func connect() {
 	cleanup, err := mysql.RegisterDriver("cloudsql-mysql",
-		cloudsqlconn.WithDNSResolver(),
-		cloudsqlconn.WithCredentialsFile("key.json"))
+		cloudsqlconn.WithDNSResolver())
 	if err != nil {
 		// ... handle error
 	}

@@ -1,3 +1,37 @@
+# v1.5.10 (2025-02-18)
+
+* **Bug Fix**: Bump go version to 1.22
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.5.9 (2025-02-07)
+
+* **Bug Fix**: typo in connect.go error message
+
+# v1.5.8 (2025-02-05)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.5.7 (2025-01-31)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.5.6 (2025-01-30)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.5.5 (2025-01-24)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+* **Dependency Update**: Upgrade to smithy-go v1.22.2.
+
+# v1.5.4 (2025-01-15)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.5.3 (2025-01-09)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
 # v1.5.2 (2024-12-19)
 
 * **Dependency Update**: Updated to the latest SDK module versions
