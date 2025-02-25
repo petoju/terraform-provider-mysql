@@ -58,7 +58,7 @@ resource "mysql_role" "developer" {
 resource "mysql_grant" "developer" {
   user     = mysql_user.jdoe.user
   host     = mysql_user.jdoe.host
-  database = "app"
+  database = "app"                   #Optional
   roles    = [mysql_role.developer.name]
 }
 ```
