@@ -386,6 +386,57 @@ func TestAccGrant_roleToUser(t *testing.T) {
 	})
 }
 
+func TestAccGrant_withoutDatabase(t *testing.T) {
+	userName := fmt.Sprintf("jdoe-test-%d", rand.Intn(100))
+	roleName := fmt.Sprintf("TFRole-%d", rand.Intn(100))
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGrantConfigWithoutDatabase(userName, roleName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "SELECT", true, false),
+					resource.TestCheckResourceAttr("mysql_grant.test", "user", userName),
+					resource.TestCheckResourceAttr("mysql_grant.test", "host", "example.com"),
+				),
+			},
+			{
+				Config:            testAccGrantConfigWithoutDatabase(userName, roleName),
+				ResourceName:      "mysql_grant.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     fmt.Sprintf("%v@%v@%v@%v", userName, "example.com", "*", "*"),
+			},
+		},
+	})
+}
+
+func testAccGrantConfigWithoutDatabase(userName string, roleName string) string {
+	return fmt.Sprintf(`
+resource "mysql_user" "test" {
+  user     = "%s"
+  host     = "example.com"
+}
+
+resource "mysql_role" "test" {
+  name = "%s"
+}
+
+resource "mysql_grant" "test" {
+  user       = mysql_user.test.user
+  host       = mysql_user.test.host
+  privileges = ["SELECT", "UPDATE"]
+}
+`, userName, roleName)
+}
+
 func TestAccGrant_complexRoleGrants(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{
