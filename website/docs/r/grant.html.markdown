@@ -58,7 +58,7 @@ resource "mysql_role" "developer" {
 resource "mysql_grant" "developer" {
   user     = mysql_user.jdoe.user
   host     = mysql_user.jdoe.host
-  database = "app"                   #Optional
+  database = "app"
   roles    = [mysql_role.developer.name]
 }
 ```
@@ -74,7 +74,7 @@ The following arguments are supported:
 * `user` - (Optional) The name of the user. Conflicts with `role`.
 * `host` - (Optional) The source host of the user. Defaults to "localhost". Conflicts with `role`.
 * `role` - (Optional) The role to grant `privileges` to. Conflicts with `user` and `host`.
-* `database` - (Required) The database to grant privileges on.
+* `database` - (optional) The database to grant privileges on.
 * `table` - (Optional) Which table to grant `privileges` on. Defaults to `*`, which is all tables.
 * `privileges` - (Optional) A list of privileges to grant to the user. Refer to a list of privileges (such as [here](https://dev.mysql.com/doc/refman/5.5/en/grant.html)) for applicable privileges. Conflicts with `roles`.
 * `roles` - (Optional) A list of roles to grant to the user. Conflicts with `privileges`.
