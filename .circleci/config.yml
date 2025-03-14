@@ -5,7 +5,7 @@ version: 2.1
 jobs:
   govet:
     docker:
-      - image: golang:1.23
+      - image: golang:1.24
     working_directory: /terraform-provider-mysql
     steps:
       - checkout
@@ -15,7 +15,7 @@ jobs:
             make vet
   integration:
     machine:
-      image: ubuntu-2204:current
+      image: ubuntu-2404:current
       docker_layer_caching: true
     parameters:
       target:
