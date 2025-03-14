@@ -352,6 +352,7 @@ func resourceGrant() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: true,
+				Default:  "*",
 			},
 
 			"table": {
@@ -431,6 +432,10 @@ func parseResourceFromData(d *schema.ResourceData) (MySQLGrant, diag.Diagnostics
 
 	// Step 2: Get generic attributes
 	database := d.Get("database").(string)
+	if database == "" {
+		// treat an empty value as a request for global privileges
+		database = "*"
+	}
 	tlsOption := d.Get("tls_option").(string)
 	grantOption := d.Get("grant").(bool)
 
