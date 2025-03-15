@@ -19,12 +19,6 @@ import (
 
 type ObjectT string
 
-var (
-	kProcedure ObjectT = "PROCEDURE"
-	kFunction  ObjectT = "FUNCTION"
-	kTable     ObjectT = "TABLE"
-)
-
 var grantCreateMutex = NewKeyedMutex()
 
 type MySQLGrant interface {

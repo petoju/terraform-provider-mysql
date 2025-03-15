@@ -440,16 +440,6 @@ func prepareTable(dbname string, tableName string) resource.TestCheckFunc {
 	}
 }
 
-func testResourceNotDefined(rn string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		_, ok := s.RootModule().Resources[rn]
-		if ok {
-			return fmt.Errorf("resource found, but not expected: %s", rn)
-		}
-		return nil
-	}
-}
-
 // Test privilege - one can condition it exists or that it doesn't exist.
 func testAccPrivilege(rn string, privilege string, expectExists bool, expectGrant bool) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -663,27 +653,6 @@ resource "mysql_grant" "test" {
   host       = "${mysql_user.test.host}"
   database   = "${mysql_database.test.name}"
   privileges = ["UPDATE", "SELECT"]
-}
-`, dbName, dbName)
-}
-
-func testAccGrantConfigBasicWithGrant(dbName string) string {
-	return fmt.Sprintf(`
-resource "mysql_database" "test" {
-  name = "%s"
-}
-
-resource "mysql_user" "test" {
-  user     = "jdoe-%s"
-  host     = "example.com"
-}
-
-resource "mysql_grant" "test" {
-  user       = "${mysql_user.test.user}"
-  host       = "${mysql_user.test.host}"
-  database   = "${mysql_database.test.name}"
-  privileges = ["UPDATE", "SELECT"]
-  grant      = "true"
 }
 `, dbName, dbName)
 }
