@@ -11,8 +11,7 @@ The `mysql_user_password` resource sets and manages a password for a given
 user on a MySQL server.
 
 ~> **NOTE on MySQL Passwords:** This resource conflicts with the `password`
-   argument for `mysql_user`. This resource uses PGP encryption to avoid
-   storing unencrypted passwords in Terraform state.
+   argument for `mysql_user`.
 
 ~> **NOTE on How Passwords are Created:** This resource **automatically**
    generates a **random** password. The password will be a random UUID.
