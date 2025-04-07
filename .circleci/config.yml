@@ -38,5 +38,5 @@ workflows:
       - integration:
           matrix:
             parameters:
-              target: ["testversion5.6", "testversion5.7", "testversion8.0", "testpercona5.7", "testpercona8.0", "testmariadb10.3", "testmariadb10.8", "testmariadb10.10", "testtidb6.1.0", "testtidb7.5.2"]
+              target: ["testversion5.6", "testversion5.7", "testversion8.0", "testversion8.4.5", "testpercona5.7", "testpercona8.0", "testmariadb10.3", "testmariadb10.8", "testmariadb10.10", "testtidb6.1.0", "testtidb7.5.2"]
       - govet
