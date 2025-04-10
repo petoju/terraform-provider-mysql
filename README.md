@@ -1,12 +1,11 @@
 **This repository is an unofficial fork**
 
-The fork is mostly based of the official (now archived) repo.
-The provider has also some extra changes and solves almost all the reported
-issues.
+The fork is mostly based on the official (now archived) repo.
+The provider also includes some extra changes and resolves almost all the
+reported issues.
 
-I incorporated changes by winebarrel/terraform-provider-mysql. Because I found
-out about that repo only after some work, PR cannot be created easily now.
-Feel free to create a PR with my code to their repo or the other way around.
+I incorporated changes from [winebarrel/terraform-provider-mysql](https://github.com/winebarrel/terraform-provider-mysql),
+another fork from the official repo.
 
 [![Build Status](https://www.travis-ci.com/petoju/terraform-provider-mysql.svg?branch=master)](https://www.travis-ci.com/petoju/terraform-provider-mysql)
 
@@ -33,7 +32,7 @@ provider "mysql" {
 Building The Provider
 ---------------------
 
-If you want to reproduce a build (to verify my build confirms to sources),
+If you want to reproduce a build (to verify that my build conforms to the sources),
 download the provider of any version first and find the correct go version:
 ```
 egrep -a -o 'go1[0-9\.]+' path_to_the_provider_binary
@@ -69,7 +68,7 @@ $ $GOPATH/bin/terraform-provider-mysql
 
 1. Docker environment
 2. mysql-client binary which can be installed on Mac with `brew install mysql-client@8.0`
-   1. Then add it to your path OR `brew link mysql-client@8.0`
+   1. Then add it to your path OR run `brew link mysql-client@8.0`
 
 ### Running tests
 
