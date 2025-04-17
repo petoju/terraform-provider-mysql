@@ -515,7 +515,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	if err != nil {
 		return diag.Errorf("failed showing grants: %v", err)
 	}
-	if conflictingGrant != nil {
+	if conflictingGrant != nil && areSameGrants(grant, conflictingGrant) {
 		return diag.Errorf("user/role %#v already has grant %v - ", grant.GetUserOrRole(), conflictingGrant)
 	}
 
@@ -814,6 +814,41 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) 
 		}
 	}
 	return result, nil
+}
+
+func areSameGrants(grantA MySQLGrant, grantB MySQLGrant) bool {
+
+	// If grants do not conflict (e.g. different users or databases), they are not the same
+	if !grantA.ConflictsWithGrant(grantB) {
+		return false
+	}
+
+	// Compare privileges
+	grantAWithPrivileges, aHasPrivileges := grantA.(MySQLGrantWithPrivileges)
+	grantBWithPrivileges, bHasPrivileges := grantB.(MySQLGrantWithPrivileges)
+	if aHasPrivileges && bHasPrivileges {
+		privilegesA := normalizePerms(grantAWithPrivileges.GetPrivileges())
+		privilegesB := normalizePerms(grantBWithPrivileges.GetPrivileges())
+		if !reflect.DeepEqual(privilegesA, privilegesB) {
+			return false
+		}
+	}
+
+	// Compare roles
+	grantAWithRoles, aHasRoles := grantA.(MySQLGrantWithRoles)
+	grantBWithRoles, bHasRoles := grantB.(MySQLGrantWithRoles)
+	if aHasRoles && bHasRoles {
+		rolesA := grantAWithRoles.GetRoles()
+		rolesB := grantBWithRoles.GetRoles()
+		sort.Strings(rolesA)
+		sort.Strings(rolesB)
+		if !reflect.DeepEqual(rolesA, rolesB) {
+			return false
+		}
+	}
+
+	// If neither privileges nor roles are present, or both match, the grants are considered the same
+	return true
 }
 
 var (
