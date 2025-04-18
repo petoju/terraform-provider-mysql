@@ -1033,7 +1033,7 @@ resource "mysql_grant" "test_procedure" {
     host       = "%s"
     privileges = ["EXECUTE"]
     database   = "PROCEDURE %s"
-	table 	   = "%s"
+    table      = "%s"
 }
 `, dbName, dbName, dbName, dbName, hostName, dbName, procedureName)
 }
@@ -1150,7 +1150,7 @@ func TestAllowDuplicateUsersDifferentTables(t *testing.T) {
 	  user       = "${mysql_user.test.user}"
 	  host       = "${mysql_user.test.host}"
 	  database   = "${mysql_database.test.name}"
-      table      = "table1"
+          table      = "table1"
 	  privileges = ["UPDATE", "SELECT"]
 	}
 
@@ -1215,7 +1215,7 @@ func TestDisallowDuplicateUsersSameTable(t *testing.T) {
 	  user       = "${mysql_user.test.user}"
 	  host       = "${mysql_user.test.host}"
 	  database   = "${mysql_database.test.name}"
-      table      = "table1"
+          table      = "table1"
 	  privileges = ["UPDATE", "SELECT"]
 	}
 
@@ -1245,4 +1245,75 @@ func TestDisallowDuplicateUsersSameTable(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestModifyPrivileges explicitly verifies the correct and incorrect ways of modifying privileges.
+// First, it tests adding privileges by augmenting the existing grant (correct way).
+// Then, it tests adding privileges by creating a new conflicting grant (incorrect way, expected to fail).
+func TestModifyPrivileges(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	onePrivilege := `"SELECT"`
+	twoPrivileges := `"SELECT", "UPDATE"`
+
+	onePrivilegeConfig := getGrantsSampleWithPrivileges(dbName, onePrivilege)
+	twoPrivilegesConfig := getGrantsSampleWithPrivileges(dbName, twoPrivileges)
+	additionalPrivilegeConfig := twoPrivilegesConfig + fmt.Sprintf(`
+
+    resource "mysql_grant" "additional_grant" {
+      role       = mysql_role.analyst.name
+      database   = "%s"
+      privileges = ["INSERT"]
+    }
+    `, dbName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGrantConfigNoGrant(dbName),
+			},
+			{
+				Config: onePrivilegeConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.grant", "UPDATE", false, false),
+				),
+			},
+			{
+				// Correct way: augment existing grant with additional privileges
+				Config: twoPrivilegesConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.grant", "UPDATE", true, false),
+				),
+			},
+			{
+				// Incorrect way: create a new conflicting grant (expected to fail)
+				Config:      additionalPrivilegeConfig,
+				ExpectError: regexp.MustCompile("already has"),
+			},
+		},
+	})
+}
+
+func getGrantsSampleWithPrivileges(dbName string, privileges string) string {
+	return fmt.Sprintf(`
+
+	resource "mysql_role" "analyst" {
+	  name     = "jdoe-role-%s"
+	}
+
+	resource "mysql_grant" "grant" {
+	  role       = "${mysql_role.analyst.name}"
+          database   = "%s"
+	  privileges = [%s]
+	}
+	`, dbName, dbName, privileges)
 }
