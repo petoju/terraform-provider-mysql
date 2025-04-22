@@ -190,6 +190,15 @@ func TestAccGrantComplex(t *testing.T) {
 				),
 			},
 			{
+				Config: testAccGrantConfigWithPrivs(dbName, "\"SELECT (`id`,`key`,`order`,`first`,`last`)\"", false),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("mysql_grant.test", "user", fmt.Sprintf("jdoe-%s", dbName)),
+					resource.TestCheckResourceAttr("mysql_grant.test", "host", "example.com"),
+					resource.TestCheckResourceAttr("mysql_grant.test", "database", dbName),
+					resource.TestCheckResourceAttr("mysql_grant.test", "table", "tbl"),
+				),
+			},
+			{
 				Config: testAccGrantConfigWithPrivs(dbName, `"DROP", "SELECT (c1)", "INSERT(c3, c4)", "REFERENCES(c5)"`, false),
 				Check: resource.ComposeTestCheckFunc(
 					testAccPrivilege("mysql_grant.test", "INSERT (c3,c4)", true, false),
@@ -484,7 +493,7 @@ func prepareTable(dbname string, tableName string) resource.TestCheckFunc {
 		if err != nil {
 			return err
 		}
-		if _, err := db.Exec(fmt.Sprintf("CREATE TABLE `%s`.`%s`(c1 INT, c2 INT, c3 INT,c4 INT,c5 INT);", dbname, tableName)); err != nil {
+		if _, err := db.Exec(fmt.Sprintf("CREATE TABLE `%s`.`%s`(c1 INT, c2 INT, c3 INT, c4 INT, c5 INT, `id` INT, `key` INT, `order` INT, `type` INT, `status` INT, `created` INT, `updated` INT, `user` INT, `name` INT, `group` INT, `value` INT, `index` INT, `source` INT, `date` INT, `state` INT, `last` INT, `first` INT, `email` INT, `phone` INT, `amount` INT, `reference` INT, `reason` INT, `hash` INT, `team` INT, `case` INT, `uid` INT, `path` INT);", dbname, tableName)); err != nil {
 			return fmt.Errorf("error reading grant: %s", err)
 		}
 		return nil
