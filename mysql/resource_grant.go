@@ -1065,10 +1065,16 @@ func normalizeColumnOrder(perm string) string {
 
 	parts := strings.Split(m[2], ",")
 	for i := range parts {
+		// erase spaces and backticks, if any
 		parts[i] = strings.Trim(parts[i], "` ")
 	}
 	sort.Strings(parts)
 	precursor := strings.Trim(m[1], " ")
+	for i := range parts {
+		// put backticks around the column names
+		parts[i] = fmt.Sprintf("`%s`", parts[i])
+	}
+	// build comma separated string from the parts, using strictly one space after comma
 	partsTogether := strings.Join(parts, ", ")
 	return fmt.Sprintf("%s(%s)", precursor, partsTogether)
 }
