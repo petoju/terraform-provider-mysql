@@ -2,7 +2,7 @@ TEST?=$$(go list ./... |grep -v 'vendor')
 GOFMT_FILES?=$$(find . -name '*.go' |grep -v vendor)
 WEBSITE_REPO=github.com/hashicorp/terraform-website
 PKG_NAME=mysql
-TERRAFORM_VERSION=0.14.7
+TERRAFORM_VERSION=1.11.3
 TERRAFORM_OS=$(shell uname -s | tr A-Z a-z)
 TEST_USER=root
 TEST_PASSWORD=my-secret-pw
@@ -22,13 +22,17 @@ bin/terraform:
 testacc: fmtcheck bin/terraform
 	PATH="$(CURDIR)/bin:${PATH}" TF_ACC=1 go test $(TEST) -v $(TESTARGS) -timeout=120s
 
-acceptance: testversion5.6 testversion5.7 testversion8.0 testpercona5.7 testpercona8.0 testmariadb10.3 testmariadb10.8 testmariadb10.10 testtidb6.1.0 testtidb7.5.2
+acceptance: testversion5.6 testversion5.7 testversion8.0 testversion8.4.5 testpercona5.7 testpercona8.0 testmariadb10.3 testmariadb10.8 testmariadb10.10 testtidb6.1.0 testtidb7.5.2
 
 testversion%:
 	$(MAKE) MYSQL_VERSION=$* MYSQL_PORT=33$(shell echo "$*" | tr -d '.') testversion
 
 testversion:
-	-docker run --rm --name test-mysql$(MYSQL_VERSION) -e MYSQL_ROOT_PASSWORD="$(TEST_PASSWORD)" -d -p $(MYSQL_PORT):3306 mysql:$(MYSQL_VERSION)
+	@MYSQLD_ARGS=""; \
+	if [ "$$(echo $(MYSQL_VERSION) | awk -F. '{ if ($$1 > 8 || ($$1 == 8 && $$2 >= 4)) print 1; else print 0 }')" -eq 1 ]; then \
+		MYSQLD_ARGS="mysqld --mysql-native-password=ON"; \
+	fi; \
+	docker run --rm --name test-mysql$(MYSQL_VERSION) -e MYSQL_ROOT_PASSWORD="$(TEST_PASSWORD)" -d -p $(MYSQL_PORT):3306 mysql:$(MYSQL_VERSION) $$MYSQLD_ARGS
 	@echo 'Waiting for MySQL...'
 	@while ! mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -p"$(TEST_PASSWORD)" -e 'SELECT 1' >/dev/null 2>&1; do printf '.'; sleep 1; done ; echo ; echo "Connected!"
 	-mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -p"$(TEST_PASSWORD)" -e "INSTALL PLUGIN mysql_no_login SONAME 'mysql_no_login.so';"
@@ -75,6 +79,7 @@ testmariadb:
 	@while ! mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -p"$(TEST_PASSWORD)" -e 'SELECT 1' >/dev/null 2>&1; do printf '.'; sleep 1; done ; echo ; echo "Connected!"
 	MYSQL_USERNAME="$(TEST_USER)" MYSQL_PASSWORD="$(TEST_PASSWORD)" MYSQL_ENDPOINT=127.0.0.1:$(MYSQL_PORT) $(MAKE) testacc
 	-docker rm -f test-mariadb$(MYSQL_VERSION)
+
 
 vet:
 	@echo "go vet ."

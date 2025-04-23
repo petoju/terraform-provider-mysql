@@ -1042,7 +1042,7 @@ resource "mysql_grant" "test_procedure" {
     host       = "%s"
     privileges = ["EXECUTE"]
     database   = "PROCEDURE %s"
-	table 	   = "%s"
+    table      = "%s"
 }
 `, dbName, dbName, dbName, dbName, hostName, dbName, procedureName)
 }
@@ -1159,7 +1159,7 @@ func TestAllowDuplicateUsersDifferentTables(t *testing.T) {
 	  user       = "${mysql_user.test.user}"
 	  host       = "${mysql_user.test.host}"
 	  database   = "${mysql_database.test.name}"
-      table      = "table1"
+          table      = "table1"
 	  privileges = ["UPDATE", "SELECT"]
 	}
 
@@ -1224,7 +1224,7 @@ func TestDisallowDuplicateUsersSameTable(t *testing.T) {
 	  user       = "${mysql_user.test.user}"
 	  host       = "${mysql_user.test.host}"
 	  database   = "${mysql_database.test.name}"
-      table      = "table1"
+          table      = "table1"
 	  privileges = ["UPDATE", "SELECT"]
 	}
 
@@ -1254,4 +1254,130 @@ func TestDisallowDuplicateUsersSameTable(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestModifyPrivileges explicitly verifies the correct and incorrect ways of modifying privileges.
+// It tests adding privileges by augmenting the existing grant (correct way).
+// It also tests that dynamic privileges configured on the global (`*`) database can coexist with grants on specific databases.
+func TestModifyPrivileges(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-modify-%d", rand.Intn(100))
+	roleName := fmt.Sprintf("TFRole-modify-%d", rand.Intn(100))
+	userName := fmt.Sprintf("jdoe-modify-%s", dbName)
+
+	onePrivilegeConfig := getGrantsSampleWithPrivileges(roleName, dbName, userName, `"SELECT"`)
+	twoPrivilegesConfig := getGrantsSampleWithPrivileges(roleName, dbName, userName, `"SELECT", "UPDATE"`)
+	additionalStaticPrivilegeConfig := twoPrivilegesConfig + getAdditionalGrantSample(dbName, `"INSERT"`)
+	threePrivilegesConfig := getGrantsSampleWithPrivileges(roleName, dbName, userName, `"SELECT", "UPDATE", "INSERT"`)
+	// Configuring dynamic privilege on global (`*`) database alongside specific database grants
+	additionalDynamicPrivilegeConfigFlushTables := threePrivilegesConfig + getAdditionalGrantSample("*", `"FLUSH_TABLES"`)
+	additionalDynamicPrivilegeConfigShowRoutine := threePrivilegesConfig + getAdditionalGrantSample("*", `"SHOW_ROUTINE"`)
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipMariaDB(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGrantConfigNoGrant(dbName),
+			},
+			{
+				Config: onePrivilegeConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.grant", "UPDATE", false, false),
+					testAccPrivilege("mysql_grant.grant", "INSERT", false, false),
+				),
+			},
+			{
+				// Correct way: augment existing grant with additional privileges
+				Config: twoPrivilegesConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.grant", "UPDATE", true, false),
+					testAccPrivilege("mysql_grant.grant", "INSERT", false, false),
+				),
+			},
+			{
+				// Incorrect way: create a new conflicting grant (expected to fail)
+				Config:      additionalStaticPrivilegeConfig,
+				ExpectError: regexp.MustCompile("already has"),
+			},
+			{
+				// Correct way: augment existing grant with additional privileges
+				Config: threePrivilegesConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.grant", "UPDATE", true, false),
+					testAccPrivilege("mysql_grant.grant", "INSERT", true, false),
+				),
+			},
+
+			// Testing coexistence of dynamic privilege on global (`*`) database with specific database grants
+
+			{
+				Config: additionalDynamicPrivilegeConfigFlushTables,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.grant", "UPDATE", true, false),
+					testAccPrivilege("mysql_grant.grant", "INSERT", true, false),
+					testAccPrivilege("mysql_grant.additional_grant", "FLUSH_TABLES", true, false),
+					testAccPrivilege("mysql_grant.additional_grant", "SHOW_ROUTINE", false, false),
+				),
+			},
+			{
+				Config: additionalDynamicPrivilegeConfigShowRoutine,
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.grant", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.grant", "UPDATE", true, false),
+					testAccPrivilege("mysql_grant.grant", "INSERT", true, false),
+					testAccPrivilege("mysql_grant.additional_grant", "FLUSH_TABLES", false, false),
+					testAccPrivilege("mysql_grant.additional_grant", "SHOW_ROUTINE", true, false),
+				),
+			},
+		},
+	})
+}
+
+func getGrantsSampleWithPrivileges(roleName string, dbName string, userName string, privileges string) string {
+	return fmt.Sprintf(`
+
+	resource "mysql_role" "role" {
+	  name     = "%s"
+	}
+
+	resource "mysql_grant" "grant" {
+	  role       = "${mysql_role.role.name}"
+	  database   = "%s"
+	  privileges = [%s]
+	}
+
+	resource "mysql_user" "user" {
+	  user = "%s"
+	  host = "%%"
+	}
+
+	resource "mysql_grant" "user_grant" {
+	  user       = "${mysql_user.user.user}"
+	  host       = "${mysql_user.user.host}"
+	  database   = "%s"
+	  roles	     = ["${mysql_role.role.name}"]
+	}
+
+	`, roleName, dbName, privileges, userName, dbName)
+}
+
+func getAdditionalGrantSample(dbName string, privileges string) string {
+	return fmt.Sprintf(`
+
+    resource "mysql_grant" "additional_grant" {
+      role       = "${mysql_role.role.name}"
+      database   = "%s"
+      privileges = [%s]
+    }
+    `, dbName, privileges)
 }
