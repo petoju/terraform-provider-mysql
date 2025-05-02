@@ -608,7 +608,7 @@ func (d *httpProxyDialer) Dial(network, addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Send the CONNECT request
 	connectReq := &http.Request{
 		Method: "CONNECT",
@@ -616,7 +616,7 @@ func (d *httpProxyDialer) Dial(network, addr string) (net.Conn, error) {
 		Host:   addr,
 		Header: make(http.Header),
 	}
-	
+
 	// Add proxy authentication if provided
 	if d.proxyURL.User != nil {
 		if password, ok := d.proxyURL.User.Password(); ok {
@@ -625,14 +625,14 @@ func (d *httpProxyDialer) Dial(network, addr string) (net.Conn, error) {
 			connectReq.Header.Set("Proxy-Authorization", basicAuth)
 		}
 	}
-	
+
 	// Write the request
 	err = connectReq.Write(conn)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
-	
+
 	// Read the response
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, connectReq)
@@ -641,13 +641,13 @@ func (d *httpProxyDialer) Dial(network, addr string) (net.Conn, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	
+
 	// Check if the connection was established
 	if resp.StatusCode != 200 {
 		conn.Close()
 		return nil, fmt.Errorf("proxy connection failed: %s", resp.Status)
 	}
-	
+
 	return conn, nil
 }
 
@@ -660,23 +660,23 @@ func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Handle HTTP and HTTPS proxies differently from SOCKS
 		if proxyURL.Scheme == "http" || proxyURL.Scheme == "https" {
 			log.Printf("[DEBUG] Using HTTP/HTTPS proxy: %s", proxyArg)
-			
+
 			// Create an HTTP transport with the proxy
 			httpTransport := &http.Transport{
 				Proxy: http.ProxyURL(proxyURL),
 			}
-			
+
 			// Create a custom dialer that uses the HTTP transport
 			return &httpProxyDialer{
-				proxyURL: proxyURL,
+				proxyURL:  proxyURL,
 				transport: httpTransport,
 			}, nil
 		}
-		
+
 		// For SOCKS proxies, use the standard library
 		proxyDialer, err := proxy.FromURL(proxyURL, proxy.Direct)
 		if err != nil {
