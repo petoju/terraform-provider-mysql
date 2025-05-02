@@ -21,11 +21,16 @@ Requirements
 Usage
 -----
 
-For Terraform 0.12+ compatibility, the configuration should specify version 1.6 or higher:
+Just include the provider, example:
 
 ```hcl
-provider "mysql" {
-  version = "~> 1.6"
+terraform {
+  required_providers {
+    mysql = {
+      source = "petoju/mysql"
+      version = "~> 3.0.72"
+    }
+  }
 }
 ```
 
@@ -46,6 +51,8 @@ goreleaser build --clean
 Files in dist should match whatever is provided. If they don't, consider reading
 https://words.filippo.io/reproducing-go-binaries-byte-by-byte/ or open an issue here.
 
+There is also experimental way to build everything in docker. I will try to use it every time,
+but I may skip it if it doesn't work. That should roughly match how I build the provider locally.
 
 Using the provider
 ----------------------
