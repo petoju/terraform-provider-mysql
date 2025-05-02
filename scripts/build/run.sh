@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -uexo pipefail
+
 if [ -e ".env" ]; then
 	source ./.env
 fi
@@ -8,6 +10,12 @@ if [ -z "$GITHUB_TOKEN" ]; then
 	echo "No github token!"
 	exit 1
 fi
+
+if [ -z "$TAG" ]; then
+	echo "No tag!"
+	exit 1
+fi
+
 
 # Debug with gpg --card-status
 # Initialize signing.
@@ -18,8 +26,8 @@ echo "Using GPG Agent Socket: ${GPG_AGENT_SOCKET}"
 
 DOCKER_IMAGE="$(docker build -q .)"
 
-docker run -e GITHUB_TOKEN -v "${GPG_AGENT_SOCKET}:/home/user/.gnupg/S.gpg-agent:rw" -v "$PWD/../../:/home/user/app" -it "$DOCKER_IMAGE"
-
 git push
 git tag -s "$TAG" -m "Update to $TAG"
 git push origin "$TAG"
+
+docker run -e GITHUB_TOKEN -v "${GPG_AGENT_SOCKET}:/home/user/.gnupg/S.gpg-agent:rw" -v "$PWD/../../:/home/user/app" -it "$DOCKER_IMAGE"
