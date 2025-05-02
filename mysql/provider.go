@@ -1,14 +1,17 @@
 package mysql
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -115,8 +118,12 @@ func Provider() *schema.Provider {
 				DefaultFunc: schema.MultiEnvDefaultFunc([]string{
 					"ALL_PROXY",
 					"all_proxy",
+					"HTTP_PROXY",
+					"http_proxy",
+					"HTTPS_PROXY",
+					"https_proxy",
 				}, nil),
-				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^socks5h?://.*:\d+$`), "The proxy URL is not a valid socks url."),
+				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^(socks5h?|http|https)://.*:\d+$`), "The proxy URL is not a valid proxy url. Must be in format: socks5://host:port, http://host:port, or https://host:port"),
 			},
 
 			"tls": {
@@ -588,6 +595,62 @@ func afterConnectVersion(ctx context.Context, mysqlConf *MySQLConfiguration, db 
 
 var identQuoteReplacer = strings.NewReplacer("`", "``")
 
+// httpProxyDialer implements the proxy.Dialer interface for HTTP proxies
+type httpProxyDialer struct {
+	proxyURL  *url.URL
+	transport *http.Transport
+}
+
+// Dial connects to the address via the HTTP proxy
+func (d *httpProxyDialer) Dial(network, addr string) (net.Conn, error) {
+	// For HTTP proxies with MySQL, we need to establish a TCP tunnel via the CONNECT method
+	conn, err := net.Dial("tcp", d.proxyURL.Host)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Send the CONNECT request
+	connectReq := &http.Request{
+		Method: "CONNECT",
+		URL:    &url.URL{Opaque: addr},
+		Host:   addr,
+		Header: make(http.Header),
+	}
+	
+	// Add proxy authentication if provided
+	if d.proxyURL.User != nil {
+		if password, ok := d.proxyURL.User.Password(); ok {
+			auth := d.proxyURL.User.Username() + ":" + password
+			basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
+			connectReq.Header.Set("Proxy-Authorization", basicAuth)
+		}
+	}
+	
+	// Write the request
+	err = connectReq.Write(conn)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	
+	// Read the response
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, connectReq)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	defer resp.Body.Close()
+	
+	// Check if the connection was established
+	if resp.StatusCode != 200 {
+		conn.Close()
+		return nil, fmt.Errorf("proxy connection failed: %s", resp.Status)
+	}
+	
+	return conn, nil
+}
+
 func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 	proxyFromEnv := proxy.FromEnvironment()
 	proxyArg := d.Get("proxy").(string)
@@ -597,6 +660,24 @@ func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 		if err != nil {
 			return nil, err
 		}
+		
+		// Handle HTTP and HTTPS proxies differently from SOCKS
+		if proxyURL.Scheme == "http" || proxyURL.Scheme == "https" {
+			log.Printf("[DEBUG] Using HTTP/HTTPS proxy: %s", proxyArg)
+			
+			// Create an HTTP transport with the proxy
+			httpTransport := &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+			}
+			
+			// Create a custom dialer that uses the HTTP transport
+			return &httpProxyDialer{
+				proxyURL: proxyURL,
+				transport: httpTransport,
+			}, nil
+		}
+		
+		// For SOCKS proxies, use the standard library
 		proxyDialer, err := proxy.FromURL(proxyURL, proxy.Direct)
 		if err != nil {
 			return nil, err
