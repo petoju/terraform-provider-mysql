@@ -704,6 +704,15 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		if foundGrant.ConflictsWithGrant(desiredGrant) {
 			res := resourceGrant().Data(nil)
 			setDataFromGrant(foundGrant, res)
+			if _, ok := desiredGrant.(*RoleGrant); ok {
+				/*
+					Import database and table for role grants literally for backwards compatibility.
+					Role grants do not have a database or table, but we still set them here to avoid
+					making existing resources to "force replacement".
+				*/
+				res.Set("database", database)
+				res.Set("table", table)
+			}
 			return []*schema.ResourceData{res}, nil
 		}
 	}
