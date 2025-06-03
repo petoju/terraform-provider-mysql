@@ -729,8 +729,6 @@ func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.Resource
 		d.Set("grant", grant.GrantOption())
 		d.Set("roles", roleGrant.Roles)
 		d.Set("tls_option", roleGrant.TLSOption)
-		d.Set("table", "*")    // Role grants do not have a table, but we keep the default for consistency
-		d.Set("database", "*") // Role grants do not have a database, but we keep the default for consistency
 	} else {
 		panic("Unknown grant type")
 	}
