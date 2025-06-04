@@ -660,7 +660,7 @@ func isNonExistingGrant(err error) bool {
 }
 
 func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	userHostDatabaseTable := strings.Split(d.Id(), "@")
+	userHostDatabaseTable := strings.Split(strings.TrimSuffix(d.Id(), ";r"), "@")
 
 	if len(userHostDatabaseTable) != 4 && len(userHostDatabaseTable) != 5 {
 		return nil, fmt.Errorf("wrong ID format %s - expected user@host@database@table (and optionally ending @ to signify grant option) where some parts can be empty)", d.Id())
