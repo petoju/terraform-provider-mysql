@@ -95,7 +95,13 @@ func resourceUser() *schema.Resource {
 				DiffSuppressFunc: NewEmptyStringSuppressFunc,
 				ConflictsWith:    []string{"plaintext_password", "password"},
 			},
-
+			"auth_string_hex": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				Sensitive:        true,
+				DiffSuppressFunc: NewEmptyStringSuppressFunc,
+				ConflictsWith:    []string{"plaintext_password", "password", "auth_string_hashed"},
+			},
 			"tls_option": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -171,6 +177,29 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 			authStm = fmt.Sprintf("%s AS ?", authStm)
 		}
 	}
+	var hashed_hex string
+	if v, ok := d.GetOk("auth_string_hex"); ok {
+		hashed_hex = v.(string)
+		if hashed_hex != "" {
+			if hashed != "" {
+				return diag.Errorf("can not specify both auth_string_hashed and auth_string_hex")
+			}
+			if authStm == "" {
+				return diag.Errorf("auth_string_hex is not supported for auth plugin %s", auth)
+			}
+			if strings.HasPrefix(hashed_hex, "0x") || strings.HasPrefix(hashed_hex, "0X") {
+				hashed_hex = hashed_hex[2:]
+			}
+
+			if err := validateHexString(hashed_hex); err != nil {
+				return diag.Errorf("invalid hex string for auth_string_hex: %v", err)
+			}
+			authStm = fmt.Sprintf("%s AS 0x%s", authStm, hashed_hex)
+		}
+
+	}
+	user := d.Get("user").(string)
+	host := d.Get("host").(string)
 
 	var stmtSQL string
 	var args []interface{}
@@ -180,15 +209,15 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		if aadIdentity["type"].(string) == "service_principal" {
 			// CREATE AADUSER 'mysqlProtocolLoginName"@"mysqlHostRestriction' IDENTIFIED BY 'identityId'
 			stmtSQL = "CREATE AADUSER ?@? IDENTIFIED BY ?"
-			args = []interface{}{d.Get("user").(string), d.Get("host").(string), aadIdentity["identity"].(string)}
+			args = []interface{}{user, host, aadIdentity["identity"].(string)}
 		} else {
 			// CREATE AADUSER 'identityName"@"mysqlHostRestriction' AS 'mysqlProtocolLoginName'
 			stmtSQL = "CREATE AADUSER ?@? AS ?"
-			args = []interface{}{aadIdentity["identity"].(string), d.Get("host").(string), d.Get("user").(string)}
+			args = []interface{}{aadIdentity["identity"].(string), host, user}
 		}
 	} else {
 		stmtSQL = "CREATE USER ?@?"
-		args = []interface{}{d.Get("user").(string), d.Get("host").(string)}
+		args = []interface{}{user, host}
 	}
 
 	var password string
@@ -198,7 +227,7 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		password = d.Get("password").(string)
 	}
 
-	if auth == "AWSAuthenticationPlugin" && d.Get("host").(string) == "localhost" {
+	if auth == "AWSAuthenticationPlugin" && host == "localhost" {
 		return diag.Errorf("cannot use IAM auth against localhost")
 	}
 
@@ -223,7 +252,7 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	if getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) && d.Get("tls_option").(string) != "" {
 		if createObj == "AADUSER" {
 			updateStmtSql = "ALTER USER ?@? REQUIRE " + d.Get("tls_option").(string)
-			updateArgs = []interface{}{d.Get("user").(string), d.Get("host").(string)}
+			updateArgs = []interface{}{user, host}
 		} else {
 			stmtSQL += " REQUIRE " + d.Get("tls_option").(string)
 		}
@@ -246,8 +275,8 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.Errorf("failed executing SQL: %v", err)
 	}
 
-	user := fmt.Sprintf("%s@%s", d.Get("user").(string), d.Get("host").(string))
-	d.SetId(user)
+	userId := fmt.Sprintf("%s@%s", user, host)
+	d.SetId(userId)
 
 	if updateStmtSql != "" {
 		log.Println("[DEBUG] Executing statement:", updateStmtSql, "args:", updateArgs)
@@ -526,4 +555,22 @@ func NewEmptyStringSuppressFunc(k, old, new string, d *schema.ResourceData) bool
 	}
 
 	return false
+}
+
+func validateHexString(hexStr string) error {
+	if len(hexStr) == 0 {
+		return fmt.Errorf("hex string cannot be empty")
+	}
+
+	if len(hexStr)%2 != 0 {
+		return fmt.Errorf("hex string must have even length")
+	}
+
+	for i, char := range strings.ToLower(hexStr) {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return fmt.Errorf("invalid hex character '%c' at position %d", char, i)
+		}
+	}
+
+	return nil
 }
