@@ -315,14 +315,24 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		auth = v.(string)
 	}
 	if len(auth) > 0 {
-		if d.HasChange("tls_option") || d.HasChange("auth_plugin") || d.HasChange("auth_string_hashed") {
+		if d.HasChange("tls_option") || d.HasChange("auth_plugin") || d.HasChange("auth_string_hashed") || d.HasChange("auth_string_hex") {
 			var stmtSQL string
 
 			authString := ""
 			if d.Get("auth_string_hashed").(string) != "" {
 				authString = fmt.Sprintf("IDENTIFIED WITH %s AS '%s'", d.Get("auth_plugin"), d.Get("auth_string_hashed"))
+			} else if d.Get("auth_string_hex").(string) != "" {
+				hexValue := d.Get("auth_string_hex").(string)
+				if strings.HasPrefix(hexValue, "0x") || strings.HasPrefix(hexValue, "0X") {
+					hexValue = hexValue[2:]
+				}
+				if err := validateHexString(hexValue); err != nil {
+					return diag.Errorf("invalid hex string for auth_string_hex: %v", err)
+				}
+
+				authString = fmt.Sprintf("IDENTIFIED WITH %s AS 0x%s", d.Get("auth_plugin"), hexValue)
 			}
-			stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' %s  REQUIRE %s",
+			stmtSQL = fmt.Sprintf("ALTER USER `%s`@`%s` %s  REQUIRE %s",
 				d.Get("user").(string),
 				d.Get("host").(string),
 				authString,
@@ -414,10 +424,15 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 	}
 	requiredVersion, _ := version.NewVersion("5.7.0")
 	if getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) {
-		stmt := "SHOW CREATE USER ?@?"
 
+		_, err := db.ExecContext(ctx, "SET print_identified_with_as_hex = ON")
+		if err != nil {
+			// return diag.Errorf("failed setting print_identified_with_as_hex: %v", err)
+			log.Printf("[DEBUG] Could not set print_identified_with_as_hex: %v", err)
+		}
+		stmt := "SHOW CREATE USER ?@?"
 		var createUserStmt string
-		err := db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
+		err = db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
 		if err != nil {
 			errorNumber := mysqlErrorNumber(err)
 			if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode {
@@ -426,17 +441,17 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 			}
 			return diag.Errorf("failed getting user: %v", err)
 		}
-
 		// Examples of create user:
 		// CREATE USER 'some_app'@'%' IDENTIFIED WITH 'mysql_native_password' AS '*0something' REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK
 		// CREATE USER `jdoe-tf-test-47`@`example.com` IDENTIFIED WITH 'caching_sha2_password' REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK PASSWORD HISTORY DEFAULT PASSWORD REUSE INTERVAL DEFAULT PASSWORD REQUIRE CURRENT DEFAULT
 		// CREATE USER `jdoe`@`example.com` IDENTIFIED WITH 'caching_sha2_password' AS '$A$005$i`xay#fG/\' TrbkNA82' REQUIRE NONE PASSWORD
-		re := regexp.MustCompile("^CREATE USER ['`]([^'`]*)['`]@['`]([^'`]*)['`] IDENTIFIED WITH ['`]([^'`]*)['`] (?:AS '((?:.*?[^\\\\])?)' )?REQUIRE ([^ ]*)")
-		if m := re.FindStringSubmatch(createUserStmt); len(m) == 6 {
+		// CREATE USER `hashed_hex`@`localhost` IDENTIFIED WITH 'caching_sha2_password' AS 0x244124303035242522434C16580334755221766C29210D2C415E033550367655494F314864686775414E735A742E6F474857504B623172525066574D524F30506B7A79646F30 REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK PASSWORD HISTORY DEFAULT PASSWORD REUSE INTERVAL DEFAULT PASSWORD REQUIRE CURRENT DEFAULT
+		re := regexp.MustCompile("^CREATE USER ['`]([^'`]*)['`]@['`]([^'`]*)['`] IDENTIFIED WITH ['`]([^'`]*)['`] (?:AS (?:'((?:.*?[^\\\\])?)'|(0x[0-9A-Fa-f]+)) )?REQUIRE ([^ ]*)")
+		if m := re.FindStringSubmatch(createUserStmt); len(m) == 7 {
 			d.Set("user", m[1])
 			d.Set("host", m[2])
 			d.Set("auth_plugin", m[3])
-			d.Set("tls_option", m[5])
+			d.Set("tls_option", m[6])
 
 			if m[3] == "aad_auth" {
 				// AADGroup:98e61c8d-e104-4f8c-b1a6-7ae873617fe6:upn:Doe_Family_Group
@@ -473,7 +488,18 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 					return diag.Errorf("AAD identity couldn't be parsed - it is %s", m[4])
 				}
 			} else {
-				d.Set("auth_string_hashed", m[4])
+				quotedAuthString := m[4]
+				hexAuthString := m[5]
+				if hexAuthString != "" {
+					d.Set("auth_string_hex", hexAuthString)
+					d.Set("auth_string_hashed", "")
+				} else if quotedAuthString != "" {
+					d.Set("auth_string_hashed", quotedAuthString)
+					d.Set("auth_string_hex", "")
+				} else {
+					d.Set("auth_string_hashed", "")
+					d.Set("auth_string_hex", "")
+				}
 			}
 			return nil
 		}
