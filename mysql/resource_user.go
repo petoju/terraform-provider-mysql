@@ -99,7 +99,7 @@ func resourceUser() *schema.Resource {
 				Type:             schema.TypeString,
 				Optional:         true,
 				Sensitive:        true,
-				DiffSuppressFunc: NewEmptyStringSuppressFunc,
+				DiffSuppressFunc: SuppressHexStringDiff,
 				ConflictsWith:    []string{"plaintext_password", "password", "auth_string_hashed"},
 			},
 			"tls_option": {
@@ -177,24 +177,23 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 			authStm = fmt.Sprintf("%s AS ?", authStm)
 		}
 	}
-	var hashed_hex string
+	var hashedHex string
 	if v, ok := d.GetOk("auth_string_hex"); ok {
-		hashed_hex = v.(string)
-		if hashed_hex != "" {
+		hashedHex = v.(string)
+		if hashedHex != "" {
 			if hashed != "" {
 				return diag.Errorf("can not specify both auth_string_hashed and auth_string_hex")
 			}
 			if authStm == "" {
 				return diag.Errorf("auth_string_hex is not supported for auth plugin %s", auth)
 			}
-			if strings.HasPrefix(hashed_hex, "0x") || strings.HasPrefix(hashed_hex, "0X") {
-				hashed_hex = hashed_hex[2:]
-			}
+			normalizedHex := normalizeHexString(hashedHex)
+			hexDigits := normalizedHex[2:] // Remove the "0x" prefix for validation
 
-			if err := validateHexString(hashed_hex); err != nil {
+			if err := validateHexString(hexDigits); err != nil {
 				return diag.Errorf("invalid hex string for auth_string_hex: %v", err)
 			}
-			authStm = fmt.Sprintf("%s AS 0x%s", authStm, hashed_hex)
+			authStm = fmt.Sprintf("%s AS 0x%s", authStm, hexDigits)
 		}
 
 	}
@@ -322,15 +321,14 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 			if d.Get("auth_string_hashed").(string) != "" {
 				authString = fmt.Sprintf("IDENTIFIED WITH %s AS '%s'", d.Get("auth_plugin"), d.Get("auth_string_hashed"))
 			} else if d.Get("auth_string_hex").(string) != "" {
-				hexValue := d.Get("auth_string_hex").(string)
-				if strings.HasPrefix(hexValue, "0x") || strings.HasPrefix(hexValue, "0X") {
-					hexValue = hexValue[2:]
-				}
-				if err := validateHexString(hexValue); err != nil {
+				authStringHex := d.Get("auth_string_hex").(string)
+				normalizedHex := normalizeHexString(authStringHex)
+
+				hexDigits := normalizedHex[2:]
+				if err := validateHexString(hexDigits); err != nil {
 					return diag.Errorf("invalid hex string for auth_string_hex: %v", err)
 				}
-
-				authString = fmt.Sprintf("IDENTIFIED WITH %s AS 0x%s", d.Get("auth_plugin"), hexValue)
+				authString = fmt.Sprintf("IDENTIFIED WITH %s AS 0x%s", d.Get("auth_plugin"), hexDigits)
 			}
 			stmtSQL = fmt.Sprintf("ALTER USER `%s`@`%s` %s  REQUIRE %s",
 				d.Get("user").(string),
@@ -489,9 +487,11 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 				}
 			} else {
 				quotedAuthString := m[4]
-				hexAuthString := m[5]
-				if hexAuthString != "" {
-					d.Set("auth_string_hex", hexAuthString)
+				authStringHex := m[5]
+
+				if authStringHex != "" {
+					normalizedHex := normalizeHexString(authStringHex)
+					d.Set("auth_string_hex", normalizedHex)
 					d.Set("auth_string_hashed", "")
 				} else if quotedAuthString != "" {
 					d.Set("auth_string_hashed", quotedAuthString)
@@ -582,6 +582,22 @@ func NewEmptyStringSuppressFunc(k, old, new string, d *schema.ResourceData) bool
 
 	return false
 }
+func SuppressHexStringDiff(k, old, new string, d *schema.ResourceData) bool {
+	if new == "" {
+		return true
+	}
+
+	// Normalize both values and compare
+	normalizedOld := normalizeHexString(old)
+	normalizedNew := normalizeHexString(new)
+
+	// Suppress diff if they're the same after normalization
+	if normalizedOld == normalizedNew {
+		return true
+	}
+
+	return false
+}
 
 func validateHexString(hexStr string) error {
 	if len(hexStr) == 0 {
@@ -599,4 +615,22 @@ func validateHexString(hexStr string) error {
 	}
 
 	return nil
+}
+
+// Add this helper function to normalize hex strings
+func normalizeHexString(hexStr string) string {
+	if hexStr == "" {
+		return ""
+	}
+
+	// Remove 0x prefix if present
+	if strings.HasPrefix(hexStr, "0x") || strings.HasPrefix(hexStr, "0X") {
+		hexStr = hexStr[2:]
+	}
+
+	// Convert to lowercase for consistency
+	hexStr = strings.ToUpper(hexStr)
+
+	// Always return with 0x prefix for consistency
+	return "0x" + hexStr
 }
