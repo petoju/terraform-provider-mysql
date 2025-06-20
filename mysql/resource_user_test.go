@@ -174,7 +174,7 @@ func TestAccUser_auth_mysql8_validation(t *testing.T) {
 			},
 			{
 				Config:      testAccUserConfig_auth_both_string_fields,
-				ExpectError: regexp.MustCompile(`can not specify both auth_string_hashed and auth_string_hex`),
+				ExpectError: regexp.MustCompile(`"auth_string_hex": conflicts with auth_string_hashed`),
 			},
 		},
 	})
