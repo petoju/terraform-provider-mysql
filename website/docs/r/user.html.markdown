@@ -48,13 +48,22 @@ resource "mysql_user" "nologin" {
 ```
 
 ## Example Usage with caching_sha2_password Authentication Plugin and plaintext password
-
 ```hcl
 resource "mysql_user" "nologin" {
   user               = "nologin"
   host               = "example.com"
   auth_plugin        = "caching_sha2_password"
   plaintext_password = "password"
+}
+```
+## Example Usage with caching_sha2_password Authentication with Hex Hash
+
+```hcl
+resource "mysql_user" "nologin" {
+  user            = "nologin"
+  host            = "example.com"
+  auth_plugin     = "caching_sha2_password"
+  auth_string_hex = "0x244124303035246C4F1E0D5D1631594F5C56701F3D327D073A724C706273307A5965516C7756"
 }
 ```
 
@@ -83,6 +92,7 @@ The following arguments are supported:
 * `password` - (Optional) Deprecated alias of `plaintext_password`, whose value is _stored as plaintext in state_. Prefer to use `plaintext_password` instead, which stores the password as an unsalted hash.
 * `auth_plugin` - (Optional) Use an [authentication plugin][ref-auth-plugins] to authenticate the user instead of using password authentication.  Description of the fields allowed in the block below.
 * `auth_string_hashed` - (Optional) Use an already hashed string as a parameter to `auth_plugin`. This can be used with passwords as well as with other auth strings.
+* `auth_string_hex` - (Optional) The authentication string as a hexadecimal value(can be with or without `0x` prefix). Primarily used with `caching_sha2_password` authentication plugin. Cannot be used with `plaintext_password`, `password`, or `auth_string_hashed`.
 * `aad_identity` - (Optional) Required when `auth_plugin` is `aad_auth`. This should be block containing `type` and `identity`. `type` can be one of `user`, `group` and `service_principal`. `identity` then should containt either UPN of user, name of group or Client ID of service principal.
 * `retain_old_password` - (Optional) When `true`, the old password is retained when changing the password. Defaults to `false`. This use MySQL Dual Password Support feature and requires MySQL version 8.0.14 or newer. See [MySQL Dual Password documentation](https://dev.mysql.com/doc/refman/8.0/en/password-management.html#dual-passwords) for more.
 * `discard_old_password` - (Optional) When `true`, the old password is deleted. Defaults to `false`. This use MySQL Dual Password Support feature and requires MySQL version 8.0.14 or newer. See [MySQL Dual Password documentation](https://dev.mysql.com/doc/refman/8.0/en/password-management.html#dual-passwords) for more.

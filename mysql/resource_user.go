@@ -95,7 +95,14 @@ func resourceUser() *schema.Resource {
 				DiffSuppressFunc: NewEmptyStringSuppressFunc,
 				ConflictsWith:    []string{"plaintext_password", "password"},
 			},
-
+			"auth_string_hex": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				Sensitive:        true,
+				StateFunc:        NormalizeHexStringStateFunc,
+				DiffSuppressFunc: SuppressHexStringDiff,
+				ConflictsWith:    []string{"plaintext_password", "password", "auth_string_hashed"},
+			},
 			"tls_option": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -171,6 +178,28 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 			authStm = fmt.Sprintf("%s AS ?", authStm)
 		}
 	}
+	var hashedHex string
+	if v, ok := d.GetOk("auth_string_hex"); ok {
+		hashedHex = v.(string)
+		if hashedHex != "" {
+			if hashed != "" {
+				return diag.Errorf("can not specify both auth_string_hashed and auth_string_hex")
+			}
+			if authStm == "" {
+				return diag.Errorf("auth_string_hex is not supported for auth plugin %s", auth)
+			}
+			normalizedHex := normalizeHexString(hashedHex)
+			hexDigits := normalizedHex[2:] // Remove the "0x" prefix for validation
+
+			if err := validateHexString(hexDigits); err != nil {
+				return diag.Errorf("invalid hex string for auth_string_hex: %v", err)
+			}
+			authStm = fmt.Sprintf("%s AS 0x%s", authStm, hexDigits)
+		}
+
+	}
+	user := d.Get("user").(string)
+	host := d.Get("host").(string)
 
 	var stmtSQL string
 	var args []interface{}
@@ -180,15 +209,15 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		if aadIdentity["type"].(string) == "service_principal" {
 			// CREATE AADUSER 'mysqlProtocolLoginName"@"mysqlHostRestriction' IDENTIFIED BY 'identityId'
 			stmtSQL = "CREATE AADUSER ?@? IDENTIFIED BY ?"
-			args = []interface{}{d.Get("user").(string), d.Get("host").(string), aadIdentity["identity"].(string)}
+			args = []interface{}{user, host, aadIdentity["identity"].(string)}
 		} else {
 			// CREATE AADUSER 'identityName"@"mysqlHostRestriction' AS 'mysqlProtocolLoginName'
 			stmtSQL = "CREATE AADUSER ?@? AS ?"
-			args = []interface{}{aadIdentity["identity"].(string), d.Get("host").(string), d.Get("user").(string)}
+			args = []interface{}{aadIdentity["identity"].(string), host, user}
 		}
 	} else {
 		stmtSQL = "CREATE USER ?@?"
-		args = []interface{}{d.Get("user").(string), d.Get("host").(string)}
+		args = []interface{}{user, host}
 	}
 
 	var password string
@@ -198,7 +227,7 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		password = d.Get("password").(string)
 	}
 
-	if auth == "AWSAuthenticationPlugin" && d.Get("host").(string) == "localhost" {
+	if auth == "AWSAuthenticationPlugin" && host == "localhost" {
 		return diag.Errorf("cannot use IAM auth against localhost")
 	}
 
@@ -223,7 +252,7 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	if getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) && d.Get("tls_option").(string) != "" {
 		if createObj == "AADUSER" {
 			updateStmtSql = "ALTER USER ?@? REQUIRE " + d.Get("tls_option").(string)
-			updateArgs = []interface{}{d.Get("user").(string), d.Get("host").(string)}
+			updateArgs = []interface{}{user, host}
 		} else {
 			stmtSQL += " REQUIRE " + d.Get("tls_option").(string)
 		}
@@ -246,8 +275,8 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.Errorf("failed executing SQL: %v", err)
 	}
 
-	user := fmt.Sprintf("%s@%s", d.Get("user").(string), d.Get("host").(string))
-	d.SetId(user)
+	userId := fmt.Sprintf("%s@%s", user, host)
+	d.SetId(userId)
 
 	if updateStmtSql != "" {
 		log.Println("[DEBUG] Executing statement:", updateStmtSql, "args:", updateArgs)
@@ -286,14 +315,23 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		auth = v.(string)
 	}
 	if len(auth) > 0 {
-		if d.HasChange("tls_option") || d.HasChange("auth_plugin") || d.HasChange("auth_string_hashed") {
+		if d.HasChange("tls_option") || d.HasChange("auth_plugin") || d.HasChange("auth_string_hashed") || d.HasChange("auth_string_hex") {
 			var stmtSQL string
 
 			authString := ""
 			if d.Get("auth_string_hashed").(string) != "" {
 				authString = fmt.Sprintf("IDENTIFIED WITH %s AS '%s'", d.Get("auth_plugin"), d.Get("auth_string_hashed"))
+			} else if d.Get("auth_string_hex").(string) != "" {
+				authStringHex := d.Get("auth_string_hex").(string)
+				normalizedHex := normalizeHexString(authStringHex)
+
+				hexDigits := normalizedHex[2:]
+				if err := validateHexString(hexDigits); err != nil {
+					return diag.Errorf("invalid hex string for auth_string_hex: %v", err)
+				}
+				authString = fmt.Sprintf("IDENTIFIED WITH %s AS 0x%s", d.Get("auth_plugin"), hexDigits)
 			}
-			stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' %s  REQUIRE %s",
+			stmtSQL = fmt.Sprintf("ALTER USER `%s`@`%s` %s  REQUIRE %s",
 				d.Get("user").(string),
 				d.Get("host").(string),
 				authString,
@@ -385,10 +423,15 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 	}
 	requiredVersion, _ := version.NewVersion("5.7.0")
 	if getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) {
-		stmt := "SHOW CREATE USER ?@?"
 
+		_, err := db.ExecContext(ctx, "SET print_identified_with_as_hex = ON")
+		if err != nil {
+			// return diag.Errorf("failed setting print_identified_with_as_hex: %v", err)
+			log.Printf("[DEBUG] Could not set print_identified_with_as_hex: %v", err)
+		}
+		stmt := "SHOW CREATE USER ?@?"
 		var createUserStmt string
-		err := db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
+		err = db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
 		if err != nil {
 			errorNumber := mysqlErrorNumber(err)
 			if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode {
@@ -397,17 +440,17 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 			}
 			return diag.Errorf("failed getting user: %v", err)
 		}
-
 		// Examples of create user:
 		// CREATE USER 'some_app'@'%' IDENTIFIED WITH 'mysql_native_password' AS '*0something' REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK
 		// CREATE USER `jdoe-tf-test-47`@`example.com` IDENTIFIED WITH 'caching_sha2_password' REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK PASSWORD HISTORY DEFAULT PASSWORD REUSE INTERVAL DEFAULT PASSWORD REQUIRE CURRENT DEFAULT
 		// CREATE USER `jdoe`@`example.com` IDENTIFIED WITH 'caching_sha2_password' AS '$A$005$i`xay#fG/\' TrbkNA82' REQUIRE NONE PASSWORD
-		re := regexp.MustCompile("^CREATE USER ['`]([^'`]*)['`]@['`]([^'`]*)['`] IDENTIFIED WITH ['`]([^'`]*)['`] (?:AS '((?:.*?[^\\\\])?)' )?REQUIRE ([^ ]*)")
-		if m := re.FindStringSubmatch(createUserStmt); len(m) == 6 {
+		// CREATE USER `hashed_hex`@`localhost` IDENTIFIED WITH 'caching_sha2_password' AS 0x244124303035242522434C16580334755221766C29210D2C415E033550367655494F314864686775414E735A742E6F474857504B623172525066574D524F30506B7A79646F30 REQUIRE NONE PASSWORD EXPIRE DEFAULT ACCOUNT UNLOCK PASSWORD HISTORY DEFAULT PASSWORD REUSE INTERVAL DEFAULT PASSWORD REQUIRE CURRENT DEFAULT
+		re := regexp.MustCompile("^CREATE USER ['`]([^'`]*)['`]@['`]([^'`]*)['`] IDENTIFIED WITH ['`]([^'`]*)['`] (?:AS (?:'((?:.*?[^\\\\])?)'|(0x[0-9A-Fa-f]+)) )?REQUIRE ([^ ]*)")
+		if m := re.FindStringSubmatch(createUserStmt); len(m) == 7 {
 			d.Set("user", m[1])
 			d.Set("host", m[2])
 			d.Set("auth_plugin", m[3])
-			d.Set("tls_option", m[5])
+			d.Set("tls_option", m[6])
 
 			if m[3] == "aad_auth" {
 				// AADGroup:98e61c8d-e104-4f8c-b1a6-7ae873617fe6:upn:Doe_Family_Group
@@ -444,7 +487,20 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 					return diag.Errorf("AAD identity couldn't be parsed - it is %s", m[4])
 				}
 			} else {
-				d.Set("auth_string_hashed", m[4])
+				quotedAuthString := m[4]
+				authStringHex := m[5]
+
+				if authStringHex != "" {
+					normalizedHex := normalizeHexString(authStringHex)
+					d.Set("auth_string_hex", normalizedHex)
+					d.Set("auth_string_hashed", "")
+				} else if quotedAuthString != "" {
+					d.Set("auth_string_hashed", quotedAuthString)
+					d.Set("auth_string_hex", "")
+				} else {
+					d.Set("auth_string_hashed", "")
+					d.Set("auth_string_hex", "")
+				}
 			}
 			return nil
 		}
@@ -526,4 +582,64 @@ func NewEmptyStringSuppressFunc(k, old, new string, d *schema.ResourceData) bool
 	}
 
 	return false
+}
+func SuppressHexStringDiff(k, old, new string, d *schema.ResourceData) bool {
+	if new == "" {
+		return true
+	}
+
+	// Normalize both values and compare
+	normalizedOld := normalizeHexString(old)
+	normalizedNew := normalizeHexString(new)
+
+	// Suppress diff if they're the same after normalization
+	if normalizedOld == normalizedNew {
+		return true
+	}
+	return false
+}
+
+func validateHexString(hexStr string) error {
+	if len(hexStr) == 0 {
+		return fmt.Errorf("hex string cannot be empty")
+	}
+
+	if len(hexStr)%2 != 0 {
+		return fmt.Errorf("hex string must have even length")
+	}
+
+	for i, char := range strings.ToLower(hexStr) {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return fmt.Errorf("invalid hex character '%c' at position %d", char, i)
+		}
+	}
+
+	return nil
+}
+
+func NormalizeHexStringStateFunc(val interface{}) string {
+	if val == nil {
+		return ""
+	}
+
+	hexStr := val.(string)
+	return normalizeHexString(hexStr) // Always store normalized format
+}
+
+// Add this helper function to normalize hex strings
+func normalizeHexString(hexStr string) string {
+	if hexStr == "" {
+		return ""
+	}
+
+	// Remove 0x prefix if present
+	if strings.HasPrefix(hexStr, "0x") || strings.HasPrefix(hexStr, "0X") {
+		hexStr = hexStr[2:]
+	}
+
+	// Convert to lowercase for consistency
+	hexStr = strings.ToUpper(hexStr)
+
+	// Always return with 0x prefix for consistency
+	return "0x" + hexStr
 }
