@@ -99,6 +99,7 @@ func resourceUser() *schema.Resource {
 				Type:             schema.TypeString,
 				Optional:         true,
 				Sensitive:        true,
+				StateFunc:        NormalizeHexStringStateFunc,
 				DiffSuppressFunc: SuppressHexStringDiff,
 				ConflictsWith:    []string{"plaintext_password", "password", "auth_string_hashed"},
 			},
@@ -595,7 +596,6 @@ func SuppressHexStringDiff(k, old, new string, d *schema.ResourceData) bool {
 	if normalizedOld == normalizedNew {
 		return true
 	}
-
 	return false
 }
 
@@ -615,6 +615,15 @@ func validateHexString(hexStr string) error {
 	}
 
 	return nil
+}
+
+func NormalizeHexStringStateFunc(val interface{}) string {
+	if val == nil {
+		return ""
+	}
+
+	hexStr := val.(string)
+	return normalizeHexString(hexStr) // Always store normalized format
 }
 
 // Add this helper function to normalize hex strings

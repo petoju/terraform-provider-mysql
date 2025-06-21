@@ -119,22 +119,43 @@ func TestAccUser_auth_mysql8(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "caching_sha2_password"),
 				),
 			},
+		},
+	})
+}
+
+func TestAccUser_auth_string_hash_mysql8(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheckSkipTiDB(t)
+			testAccPreCheckSkipMariaDB(t)
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.14")
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
 			{
 				Config: testAccUserConfig_auth_caching_sha2_password_hex_no_prefix,
 				Check: resource.ComposeTestCheckFunc(
 					testAccUserAuthExists("mysql_user.test"),
-					resource.TestCheckResourceAttr("mysql_user.test", "user", "jdoe"),
-					resource.TestCheckResourceAttr("mysql_user.test", "host", "example.com"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "hex"),
+					resource.TestCheckResourceAttr("mysql_user.test", "host", "%"),
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "caching_sha2_password"),
-					resource.TestCheckResourceAttr("mysql_user.test", "auth_string_hex", "0x244124303035246C4F1E0D5D1631594F5C56701F3D327D073A724C706273307A5965516C7756576B317A5064687A715347765747746B66746A5A4F6E384C41756E6750495330"),
+					resource.TestCheckResourceAttr("mysql_user.test", "auth_string_hex", "0x244124303035242931790D223576077A1446190832544A61301A256D5245316662534E56317A434A6A625139555A5642486F4B7A6F675266656B583330744379783134313239"),
+				),
+			},
+			{
+				Config: testAccUserConfig_auth_caching_sha2_password_hex_no_prefix,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserAuthValid("hex", "password"),
 				),
 			},
 			{
 				Config: testAccUserConfig_auth_caching_sha2_password_hex_with_prefix,
 				Check: resource.ComposeTestCheckFunc(
 					testAccUserAuthExists("mysql_user.test"),
-					resource.TestCheckResourceAttr("mysql_user.test", "user", "jdoe"),
-					resource.TestCheckResourceAttr("mysql_user.test", "host", "example.com"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "hex"),
+					resource.TestCheckResourceAttr("mysql_user.test", "host", "%"),
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "caching_sha2_password"),
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_string_hex", "0x244124303035246C4F1E0D5D1631594F5C56701F3D327D073A724C706273307A5965516C7756576B317A5064687A715347765747746B66746A5A4F6E384C41756E6750495330"),
 				),
@@ -143,8 +164,8 @@ func TestAccUser_auth_mysql8(t *testing.T) {
 				Config: testAccUserConfig_auth_caching_sha2_password_hex_updated,
 				Check: resource.ComposeTestCheckFunc(
 					testAccUserAuthExists("mysql_user.test"),
-					resource.TestCheckResourceAttr("mysql_user.test", "user", "jdoe"),
-					resource.TestCheckResourceAttr("mysql_user.test", "host", "example.com"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "hex"),
+					resource.TestCheckResourceAttr("mysql_user.test", "host", "%"),
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_plugin", "caching_sha2_password"),
 					resource.TestCheckResourceAttr("mysql_user.test", "auth_string_hex", "0x244124303035242931790D223576077A1446190832544A61301A256D5245316662534E56317A434A6A625139555A5642486F4B7A6F675266656B583330744379783134313239"),
 				),
@@ -585,24 +606,24 @@ resource "mysql_user" "test" {
 
 const testAccUserConfig_auth_caching_sha2_password_hex_no_prefix = `
 resource "mysql_user" "test" {
-    user            = "jdoe"
-    host            = "example.com"
+    user            = "hex"
+    host            = "%"
     auth_plugin     = "caching_sha2_password"
-    auth_string_hex = "244124303035246C4F1E0D5D1631594F5C56701F3D327D073A724C706273307A5965516C7756576B317A5064687A715347765747746B66746A5A4F6E384C41756E6750495330"
+    auth_string_hex = "244124303035242931790D223576077A1446190832544A61301A256D5245316662534E56317A434A6A625139555A5642486F4B7A6F675266656B583330744379783134313239"
 }
 `
 const testAccUserConfig_auth_caching_sha2_password_hex_with_prefix = `
 resource "mysql_user" "test" {
-    user            = "jdoe"
-    host            = "example.com"
+    user            = "hex"
+    host            = "%"
     auth_plugin     = "caching_sha2_password"
     auth_string_hex = "0x244124303035246C4F1E0D5D1631594F5C56701F3D327D073A724C706273307A5965516C7756576B317A5064687A715347765747746B66746A5A4F6E384C41756E6750495330"
 }
 `
 const testAccUserConfig_auth_caching_sha2_password_hex_updated = `
 resource "mysql_user" "test" {
-    user            = "jdoe"
-    host            = "example.com"
+    user            = "hex"
+    host            = "%"
     auth_plugin     = "caching_sha2_password"
     auth_string_hex = "244124303035242931790D223576077A1446190832544A61301A256D5245316662534E56317A434A6A625139555A5642486F4B7A6F675266656B583330744379783134313239"
 }
