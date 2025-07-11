@@ -56,6 +56,83 @@ but I may skip it if it doesn't work. That should roughly match how I build the 
 
 Using the provider
 ----------------------
+
+### AWS RDS IAM Authentication
+
+The provider supports AWS RDS IAM authentication using the `aws_rds_iam_auth` parameter. You can configure AWS credentials and assume role settings using the `aws_config` block.
+
+#### Prerequisites:
+
+Before using AWS RDS IAM authentication, ensure:
+
+1. **RDS Instance**: IAM authentication is enabled on your RDS instance
+2. **Database User**: Create user with IAM plugin: `CREATE USER 'username' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';`
+3. **IAM Permissions**: Your AWS credentials have `rds-db:connect` permission
+4. **Network**: Security groups allow connection from your Terraform execution environment
+
+#### Basic usage with AWS RDS IAM authentication:
+
+```hcl
+provider "mysql" {
+  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
+  username         = "your-iam-user"
+  aws_rds_iam_auth = true
+  
+  aws_config {
+    region = "us-east-1"
+  }
+}
+```
+
+#### Using assume role for AWS RDS IAM authentication:
+
+```hcl
+provider "mysql" {
+  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
+  username         = "your-iam-user"
+  aws_rds_iam_auth = true
+  
+  aws_config {
+    region   = "us-east-1"
+    role_arn = "arn:aws:iam::123456789012:role/MyRDSRole"
+  }
+}
+```
+
+#### Legacy usage (backward compatibility):
+
+For backward compatibility, the `aws://` endpoint prefix is still supported:
+
+```hcl
+provider "mysql" {
+  endpoint = "aws://your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-user"
+  
+  aws_config {
+    region   = "us-east-1"
+    role_arn = "arn:aws:iam::123456789012:role/MyRDSRole"
+  }
+}
+```
+
+#### Available aws_config parameters:
+
+- `region` - AWS region where the RDS instance is located
+- `profile` - AWS profile to use from credentials file
+- `access_key` - AWS access key (must be used with secret_key)
+- `secret_key` - AWS secret key (must be used with access_key)  
+- `role_arn` - ARN of the IAM role to assume for RDS authentication
+
+#### Important notes:
+
+- When `aws_rds_iam_auth = true` is set, the `password` parameter is ignored and auth token is generated automatically
+- The `aws_config` block is required when `aws_rds_iam_auth = true`
+- The `role_arn` parameter allows you to assume a specific IAM role for RDS authentication, similar to the PostgreSQL provider functionality
+- The database user must be created with IAM authentication enabled: `CREATE USER 'username' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';`
+- IAM database authentication must be enabled on your RDS instance
+- Your AWS credentials must have `rds-db:connect` permission for the specific database user and instance
+- TLS connection is automatically enabled for AWS RDS IAM authentication (required by AWS)
+
 ## Fill in for each provider
 
 Developing the Provider
