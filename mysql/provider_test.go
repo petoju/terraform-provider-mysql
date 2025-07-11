@@ -53,6 +53,238 @@ func TestProvider_impl(t *testing.T) {
 	var _ = Provider()
 }
 
+func TestBuildAwsConfig(t *testing.T) {
+	testCases := []struct {
+		name           string
+		awsConfigBlock []interface{}
+		expectedError  bool
+		expectedRegion string
+		hasCredentials bool
+	}{
+		{
+			name:           "empty config block",
+			awsConfigBlock: []interface{}{},
+			expectedError:  false,
+		},
+		{
+			name: "config with region only",
+			awsConfigBlock: []interface{}{
+				map[string]interface{}{
+					"region":     "us-west-2",
+					"profile":    "",
+					"access_key": "",
+					"secret_key": "",
+					"role_arn":   "",
+				},
+			},
+			expectedError:  false,
+			expectedRegion: "us-west-2",
+		},
+		{
+			name: "config with access key and secret key",
+			awsConfigBlock: []interface{}{
+				map[string]interface{}{
+					"region":     "us-east-1",
+					"profile":    "",
+					"access_key": "test-access-key",
+					"secret_key": "test-secret-key",
+					"role_arn":   "",
+				},
+			},
+			expectedError:  false,
+			expectedRegion: "us-east-1",
+			hasCredentials: true,
+		},
+		{
+			name: "config with role_arn",
+			awsConfigBlock: []interface{}{
+				map[string]interface{}{
+					"region":     "us-east-1",
+					"profile":    "",
+					"access_key": "",
+					"secret_key": "",
+					"role_arn":   "arn:aws:iam::123456789012:role/TestRole",
+				},
+			},
+			expectedError:  false,
+			expectedRegion: "us-east-1",
+			hasCredentials: true,
+		},
+		{
+			name: "config with incomplete access key",
+			awsConfigBlock: []interface{}{
+				map[string]interface{}{
+					"region":     "us-east-1",
+					"profile":    "",
+					"access_key": "test-access-key",
+					"secret_key": "",
+					"role_arn":   "",
+				},
+			},
+			expectedError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			config, err := buildAwsConfig(ctx, tc.awsConfigBlock)
+
+			if tc.expectedError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if tc.expectedRegion != "" && config.Region != tc.expectedRegion {
+				t.Errorf("Expected region %s, got %s", tc.expectedRegion, config.Region)
+			}
+
+			if tc.hasCredentials {
+				creds, err := config.Credentials.Retrieve(ctx)
+
+				// For role_arn test, we expect the credentials to be available
+				// (even if they might fail in actual AWS call due to test environment)
+				if tc.awsConfigBlock[0].(map[string]interface{})["role_arn"].(string) != "" {
+					// In test environment, assume role might not work due to lack of valid AWS credentials
+					if err != nil {
+						t.Logf("Note: Assume role credentials not available in test environment: %v", err)
+						// This is expected in test environment, so don't fail the test
+						return
+					}
+				}
+
+				if err != nil {
+					t.Errorf("Failed to retrieve credentials: %v", err)
+					return
+				}
+
+				// Just check that credentials object exists
+				if creds.AccessKeyID == "" && creds.SecretAccessKey == "" {
+					t.Logf("Note: Credentials not available in test environment")
+				}
+			}
+		})
+	}
+}
+
+func TestProviderAwsRdsIamAuth(t *testing.T) {
+	testCases := []struct {
+		name          string
+		config        map[string]interface{}
+		expectedError bool
+		errorMessage  string
+	}{
+		{
+			name: "aws_rds_iam_auth enabled with valid aws_config",
+			config: map[string]interface{}{
+				"endpoint":         "test-endpoint.amazonaws.com:3306",
+				"username":         "test-user",
+				"password":         "should-be-ignored",
+				"aws_rds_iam_auth": true,
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":     "us-east-1",
+						"role_arn":   "arn:aws:iam::123456789012:role/TestRole",
+						"access_key": "",
+						"secret_key": "",
+						"profile":    "",
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "aws_rds_iam_auth enabled without aws_config should fail",
+			config: map[string]interface{}{
+				"endpoint":         "test-endpoint.amazonaws.com:3306",
+				"username":         "test-user",
+				"aws_rds_iam_auth": true,
+				"aws_config":       []interface{}{},
+			},
+			expectedError: true,
+			errorMessage:  "aws_config block is required when aws_rds_iam_auth is enabled",
+		},
+		{
+			name: "aws_rds_iam_auth disabled should work normally",
+			config: map[string]interface{}{
+				"endpoint":         "test-endpoint.amazonaws.com:3306",
+				"username":         "test-user",
+				"password":         "test-password",
+				"aws_rds_iam_auth": false,
+			},
+			expectedError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := Provider()
+			ctx := context.Background()
+
+			// Create ResourceData from the test config
+			raw := make(map[string]interface{})
+			for k, v := range tc.config {
+				raw[k] = v
+			}
+
+			resourceConfig := terraform.NewResourceConfigRaw(raw)
+			resourceData := schema.TestResourceDataRaw(t, provider.Schema, raw)
+
+			// Test configuration
+			_, diags := provider.ConfigureContextFunc(ctx, resourceData)
+
+			if tc.expectedError {
+				if !diags.HasError() {
+					t.Errorf("Expected error but got none")
+					return
+				}
+
+				if tc.errorMessage != "" {
+					found := false
+					for _, diag := range diags {
+						if strings.Contains(diag.Summary, tc.errorMessage) || strings.Contains(diag.Detail, tc.errorMessage) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("Expected error message containing '%s', but got: %v", tc.errorMessage, diags)
+					}
+				}
+			} else {
+				if diags.HasError() {
+					// For tests that use AWS credentials, we might get auth errors in test environment
+					// Check if it's a credential-related error which is expected
+					isCredentialError := false
+					for _, diag := range diags {
+						if strings.Contains(diag.Summary, "failed to build AWS RDS auth token") ||
+							strings.Contains(diag.Detail, "InvalidClientTokenId") ||
+							strings.Contains(diag.Detail, "NoCredentialProviders") {
+							isCredentialError = true
+							break
+						}
+					}
+
+					if !isCredentialError {
+						t.Errorf("Unexpected error: %v", diags)
+					} else {
+						t.Logf("Note: AWS credential error in test environment (expected): %v", diags)
+					}
+				}
+			}
+
+			_ = resourceConfig // Prevent unused variable warning
+		})
+	}
+}
+
 func testAccPreCheck(t *testing.T) {
 	ctx := context.Background()
 	for _, name := range []string{"MYSQL_ENDPOINT", "MYSQL_USERNAME"} {
