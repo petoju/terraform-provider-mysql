@@ -9,42 +9,42 @@ terraform {
 
 # Example: Using assume role for AWS RDS IAM authentication
 provider "mysql" {
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-database-user"
-  aws_rds_iam_auth = true
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-database-user"
   
   aws_config {
-    region   = "us-east-1"
-    role_arn = "arn:aws:iam::123456789012:role/MyRDSRole"
+    aws_rds_iam_auth = true
+    region           = "us-east-1"
+    role_arn         = "arn:aws:iam::123456789012:role/MyRDSRole"
   }
 }
 
 # Example: Using assume role with existing credentials
 provider "mysql" {
-  alias            = "with_base_credentials"
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-database-user"
-  aws_rds_iam_auth = true
+  alias    = "with_base_credentials"
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-database-user"
   
   aws_config {
-    region     = "us-east-1"
-    access_key = "your-access-key"
-    secret_key = "your-secret-key"
-    role_arn   = "arn:aws:iam::123456789012:role/MyRDSRole"
+    access_key       = "your-access-key"
+    aws_rds_iam_auth = true
+    region           = "us-east-1"
+    role_arn         = "arn:aws:iam::123456789012:role/MyRDSRole"
+    secret_key       = "your-secret-key"
   }
 }
 
 # Example: Using assume role with AWS profile
 provider "mysql" {
-  alias            = "with_profile"
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-database-user"
-  aws_rds_iam_auth = true
+  alias    = "with_profile"
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-database-user"
   
   aws_config {
-    region   = "us-east-1"
-    profile  = "your-aws-profile"
-    role_arn = "arn:aws:iam::123456789012:role/MyRDSRole"
+    aws_rds_iam_auth = true
+    profile          = "your-aws-profile"
+    region           = "us-east-1"
+    role_arn         = "arn:aws:iam::123456789012:role/MyRDSRole"
   }
 }
 

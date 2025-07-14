@@ -184,40 +184,59 @@ func TestProviderAwsRdsIamAuth(t *testing.T) {
 		{
 			name: "aws_rds_iam_auth enabled with valid aws_config",
 			config: map[string]interface{}{
-				"endpoint":         "test-endpoint.amazonaws.com:3306",
-				"username":         "test-user",
-				"password":         "should-be-ignored",
-				"aws_rds_iam_auth": true,
+				"endpoint": "test-endpoint.amazonaws.com:3306",
+				"username": "test-user",
 				"aws_config": []interface{}{
 					map[string]interface{}{
-						"region":     "us-east-1",
-						"role_arn":   "arn:aws:iam::123456789012:role/TestRole",
-						"access_key": "",
-						"secret_key": "",
-						"profile":    "",
+						"region":           "us-east-1",
+						"role_arn":         "arn:aws:iam::123456789012:role/TestRole",
+						"access_key":       "",
+						"secret_key":       "",
+						"profile":          "",
+						"aws_rds_iam_auth": true,
 					},
 				},
 			},
 			expectedError: false,
 		},
 		{
-			name: "aws_rds_iam_auth enabled without aws_config should fail",
+			name: "aws_rds_iam_auth enabled with password should fail",
 			config: map[string]interface{}{
-				"endpoint":         "test-endpoint.amazonaws.com:3306",
-				"username":         "test-user",
-				"aws_rds_iam_auth": true,
-				"aws_config":       []interface{}{},
+				"endpoint": "test-endpoint.amazonaws.com:3306",
+				"username": "test-user",
+				"password": "should-not-be-provided",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"role_arn":         "arn:aws:iam::123456789012:role/TestRole",
+						"aws_rds_iam_auth": true,
+					},
+				},
 			},
 			expectedError: true,
-			errorMessage:  "aws_config block is required when aws_rds_iam_auth is enabled",
+			errorMessage:  "password must be empty when aws_rds_iam_auth is enabled",
 		},
 		{
 			name: "aws_rds_iam_auth disabled should work normally",
 			config: map[string]interface{}{
-				"endpoint":         "test-endpoint.amazonaws.com:3306",
-				"username":         "test-user",
-				"password":         "test-password",
-				"aws_rds_iam_auth": false,
+				"endpoint": "test-endpoint.amazonaws.com:3306",
+				"username": "test-user",
+				"password": "test-password",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"aws_rds_iam_auth": false,
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "aws_rds_iam_auth disabled should work normally without aws_config",
+			config: map[string]interface{}{
+				"endpoint": "test-endpoint.amazonaws.com:3306",
+				"username": "test-user",
+				"password": "test-password",
 			},
 			expectedError: false,
 		},
@@ -234,7 +253,6 @@ func TestProviderAwsRdsIamAuth(t *testing.T) {
 				raw[k] = v
 			}
 
-			resourceConfig := terraform.NewResourceConfigRaw(raw)
 			resourceData := schema.TestResourceDataRaw(t, provider.Schema, raw)
 
 			// Test configuration
@@ -279,8 +297,6 @@ func TestProviderAwsRdsIamAuth(t *testing.T) {
 					}
 				}
 			}
-
-			_ = resourceConfig // Prevent unused variable warning
 		})
 	}
 }

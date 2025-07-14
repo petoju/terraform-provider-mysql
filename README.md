@@ -74,12 +74,12 @@ Before using AWS RDS IAM authentication, ensure:
 
 ```hcl
 provider "mysql" {
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-user"
-  aws_rds_iam_auth = true
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-user"
   
   aws_config {
-    region = "us-east-1"
+    aws_rds_iam_auth = true
+    region           = "us-east-1"
   }
 }
 ```
@@ -88,13 +88,13 @@ provider "mysql" {
 
 ```hcl
 provider "mysql" {
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-user"
-  aws_rds_iam_auth = true
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-user"
   
   aws_config {
-    region   = "us-east-1"
-    role_arn = "arn:aws:iam::123456789012:role/MyRDSRole"
+    aws_rds_iam_auth = true
+    region           = "us-east-1"
+    role_arn         = "arn:aws:iam::123456789012:role/MyRDSRole"
   }
 }
 ```
@@ -125,13 +125,12 @@ provider "mysql" {
 
 #### Important notes:
 
-- When `aws_rds_iam_auth = true` is set, the `password` parameter is ignored and auth token is generated automatically
-- The `aws_config` block is required when `aws_rds_iam_auth = true`
+- When `aws_rds_iam_auth = true` is set in the `aws_config` block, the `password` parameter is ignored and auth token is generated automatically
 - The `role_arn` parameter allows you to assume a specific IAM role for RDS authentication, similar to the PostgreSQL provider functionality
 - The database user must be created with IAM authentication enabled: `CREATE USER 'username' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';`
 - IAM database authentication must be enabled on your RDS instance
 - Your AWS credentials must have `rds-db:connect` permission for the specific database user and instance
-- TLS connection is automatically enabled for AWS RDS IAM authentication (required by AWS)
+- TLS connection is required for AWS RDS IAM authentication (ensure your `tls` parameter is properly configured)
 
 ## Fill in for each provider
 

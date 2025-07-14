@@ -95,49 +95,49 @@ The provider supports several ways to configure AWS credentials with assume role
 ### Option 1: Default credentials with assume role
 ```hcl
 provider "mysql" {
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-database-user"
-  aws_rds_iam_auth = true
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-database-user"
   
   aws_config {
-    region   = "us-east-1"
-    role_arn = "arn:aws:iam::123456789012:role/MyRDSRole"
+    aws_rds_iam_auth = true
+    region           = "us-east-1"
+    role_arn         = "arn:aws:iam::123456789012:role/MyRDSRole"
   }
 }
 ```
 
-### Option 2: Explicit credentials with assume role
+### Option 2: Static credentials with assume role
 ```hcl
 provider "mysql" {
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-database-user"
-  aws_rds_iam_auth = true
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-database-user"
   
   aws_config {
-    region     = "us-east-1"
-    access_key = "your-access-key"
-    secret_key = "your-secret-key"
-    role_arn   = "arn:aws:iam::123456789012:role/MyRDSRole"
+    access_key       = "your-access-key"
+    aws_rds_iam_auth = true
+    region           = "us-east-1"
+    role_arn         = "arn:aws:iam::123456789012:role/MyRDSRole"
+    secret_key       = "your-secret-key"
   }
 }
 ```
 
-### Option 3: Profile-based credentials with assume role
+### Option 3: AWS profile with assume role
 ```hcl
 provider "mysql" {
-  endpoint         = "your-rds-endpoint.amazonaws.com:3306"
-  username         = "your-iam-database-user"
-  aws_rds_iam_auth = true
+  endpoint = "your-rds-endpoint.amazonaws.com:3306"
+  username = "your-iam-database-user"
   
   aws_config {
-    region   = "us-east-1"
-    profile  = "your-aws-profile"
-    role_arn = "arn:aws:iam::123456789012:role/MyRDSRole"
+    aws_rds_iam_auth = true
+    profile          = "your-aws-profile"
+    region           = "us-east-1"
+    role_arn         = "arn:aws:iam::123456789012:role/MyRDSRole"
   }
 }
 ```
 
-### Option 4: Legacy usage (backward compatibility)
+### Option 4: Legacy usage with aws:// prefix
 ```hcl
 provider "mysql" {
   endpoint = "aws://your-rds-endpoint.amazonaws.com:3306"
@@ -162,4 +162,4 @@ provider "mysql" {
 1. **InvalidClientTokenId**: Ensure your base credentials have permission to assume the target role
 2. **Access Denied**: Check that the assumed role has the correct RDS connect permissions
 3. **Database Connection Failed**: Verify the database user exists and has IAM authentication enabled
-4. **Incorrect Role ARN**: Ensure the role ARN format is correct and the role exists 
+4. **Incorrect Role ARN**: Ensure the role ARN format is correct and the role exists
