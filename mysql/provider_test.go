@@ -175,6 +175,13 @@ func TestBuildAwsConfig(t *testing.T) {
 }
 
 func TestProviderAwsRdsIamAuth(t *testing.T) {
+	// Temporarily unset MYSQL_PASSWORD to ensure the test is not affected by environment variables.
+	// This is necessary because the provider is designed to fail loudly if password is set and nonempty when aws_rds_iam_auth is enabled.
+	// By unsetting the environment variable here, we guarantee the test checks only the intended config logic and not external CI state.
+	// This does NOT affect normal provider behavior for non-AWS or non-IAM scenarios: if a user sets a password (via config or env) with IAM auth enabled, the provider will still return an error as required.
+	orig := os.Getenv("MYSQL_PASSWORD")
+	os.Unsetenv("MYSQL_PASSWORD")
+	defer os.Setenv("MYSQL_PASSWORD", orig)
 	testCases := []struct {
 		name          string
 		config        map[string]interface{}
@@ -186,6 +193,7 @@ func TestProviderAwsRdsIamAuth(t *testing.T) {
 			config: map[string]interface{}{
 				"endpoint": "test-endpoint.amazonaws.com:3306",
 				"username": "test-user",
+				"password": "", // Override MYSQL_PASSWORD env var
 				"aws_config": []interface{}{
 					map[string]interface{}{
 						"region":           "us-east-1",
