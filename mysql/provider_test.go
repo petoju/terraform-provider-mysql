@@ -309,6 +309,188 @@ func TestProviderAwsRdsIamAuth(t *testing.T) {
 	}
 }
 
+func TestProviderRdsDataApiConfig(t *testing.T) {
+	// Temporarily unset MYSQL_PASSWORD to ensure the test is not affected by environment variables.
+	orig := os.Getenv("MYSQL_PASSWORD")
+	os.Unsetenv("MYSQL_PASSWORD")
+	defer os.Setenv("MYSQL_PASSWORD", orig)
+
+	testCases := []struct {
+		name          string
+		config        map[string]interface{}
+		expectedError bool
+		errorMessage  string
+	}{
+		{
+			name: "use_rds_data_api enabled with valid config",
+			config: map[string]interface{}{
+				"endpoint": "dummy-endpoint", // Not used with RDS Data API
+				"username": "dummy-user",     // Not used with RDS Data API
+				"password": "",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"use_rds_data_api": true,
+						"cluster_arn":      "arn:aws:rds:us-east-1:123456789012:cluster:test-cluster",
+						"secret_arn":       "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "use_rds_data_api enabled without cluster_arn should fail",
+			config: map[string]interface{}{
+				"endpoint": "dummy-endpoint",
+				"username": "dummy-user",
+				"password": "",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"use_rds_data_api": true,
+						"cluster_arn":      "",
+						"secret_arn":       "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
+					},
+				},
+			},
+			expectedError: true,
+			errorMessage:  "cluster_arn is required when use_rds_data_api is true",
+		},
+		{
+			name: "use_rds_data_api enabled without secret_arn should fail",
+			config: map[string]interface{}{
+				"endpoint": "dummy-endpoint",
+				"username": "dummy-user",
+				"password": "",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"use_rds_data_api": true,
+						"cluster_arn":      "arn:aws:rds:us-east-1:123456789012:cluster:test-cluster",
+						"secret_arn":       "",
+					},
+				},
+			},
+			expectedError: true,
+			errorMessage:  "secret_arn is required when use_rds_data_api is true",
+		},
+		{
+			name: "use_rds_data_api and aws_rds_iam_auth both enabled should fail",
+			config: map[string]interface{}{
+				"endpoint": "dummy-endpoint",
+				"username": "dummy-user",
+				"password": "",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"use_rds_data_api": true,
+						"aws_rds_iam_auth": true,
+						"cluster_arn":      "arn:aws:rds:us-east-1:123456789012:cluster:test-cluster",
+						"secret_arn":       "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
+					},
+				},
+			},
+			expectedError: true,
+			errorMessage:  "use_rds_data_api and aws_rds_iam_auth cannot both be enabled",
+		},
+		{
+			name: "use_rds_data_api with password should fail",
+			config: map[string]interface{}{
+				"endpoint": "dummy-endpoint",
+				"username": "dummy-user",
+				"password": "should-not-be-provided",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"use_rds_data_api": true,
+						"cluster_arn":      "arn:aws:rds:us-east-1:123456789012:cluster:test-cluster",
+						"secret_arn":       "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
+					},
+				},
+			},
+			expectedError: true,
+			errorMessage:  "password must be empty when use_rds_data_api is enabled",
+		},
+		{
+			name: "use_rds_data_api without endpoint and username should succeed",
+			config: map[string]interface{}{
+				// endpoint and username are omitted
+				"password": "",
+				"aws_config": []interface{}{
+					map[string]interface{}{
+						"region":           "us-east-1",
+						"use_rds_data_api": true,
+						"cluster_arn":      "arn:aws:rds:us-east-1:123456789012:cluster:test-cluster",
+						"secret_arn":       "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "without rds_data_api, endpoint is required",
+			config: map[string]interface{}{
+				"endpoint": "", // Explicitly set to empty to override env var
+				"username": "test-user",
+				"password": "",
+			},
+			expectedError: true,
+			errorMessage:  "endpoint is required when use_rds_data_api is false",
+		},
+		{
+			name: "without rds_data_api, username is required",
+			config: map[string]interface{}{
+				"endpoint": "localhost:3306",
+				"username": "", // Explicitly set to empty to override env var
+				"password": "",
+			},
+			expectedError: true,
+			errorMessage:  "username is required when use_rds_data_api is false",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := Provider()
+			ctx := context.Background()
+
+			// Create ResourceData from the test config
+			raw := make(map[string]interface{})
+			for k, v := range tc.config {
+				raw[k] = v
+			}
+
+			d := schema.TestResourceDataRaw(t, provider.Schema, raw)
+
+			// Call providerConfigure
+			_, diags := providerConfigure(ctx, d)
+
+			if tc.expectedError {
+				if !diags.HasError() {
+					t.Errorf("Expected error but got none")
+				} else {
+					// Check if the error message contains the expected text
+					found := false
+					for _, diag := range diags {
+						if strings.Contains(diag.Summary, tc.errorMessage) ||
+							strings.Contains(diag.Detail, tc.errorMessage) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("Expected error message containing '%s', but got: %v", tc.errorMessage, diags)
+					}
+				}
+			} else {
+				if diags.HasError() {
+					t.Errorf("Unexpected error: %v", diags)
+				}
+			}
+		})
+	}
+}
+
 func testAccPreCheck(t *testing.T) {
 	ctx := context.Background()
 	for _, name := range []string{"MYSQL_ENDPOINT", "MYSQL_USERNAME"} {

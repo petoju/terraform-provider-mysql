@@ -41,6 +41,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	awsRdsAuth "github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	rds "github.com/krotscheck/go-rds-driver"
 )
 
 const (
@@ -64,6 +65,11 @@ type MySQLConfiguration struct {
 	MaxConnLifetime        time.Duration
 	MaxOpenConns           int
 	ConnectRetryTimeoutSec time.Duration
+}
+
+type RDSDataAPIConfiguration struct {
+	Config    *rds.Config
+	AWSConfig aws.Config
 }
 
 type CustomTLS struct {
@@ -90,21 +96,13 @@ func Provider() *schema.Provider {
 		Schema: map[string]*schema.Schema{
 			"endpoint": {
 				Type:        schema.TypeString,
-				Required:    true,
+				Optional:    true,
 				DefaultFunc: schema.EnvDefaultFunc("MYSQL_ENDPOINT", nil),
-				ValidateFunc: func(v interface{}, k string) (ws []string, errors []error) {
-					value := v.(string)
-					if value == "" {
-						errors = append(errors, fmt.Errorf("endpoint must not be an empty string"))
-					}
-
-					return
-				},
 			},
 
 			"username": {
 				Type:        schema.TypeString,
-				Required:    true,
+				Optional:    true,
 				DefaultFunc: schema.EnvDefaultFunc("MYSQL_USERNAME", nil),
 			},
 
@@ -241,6 +239,22 @@ func Provider() *schema.Provider {
 							Default:     false,
 							Description: "Enable AWS RDS IAM authentication. When enabled, password is ignored and auth token is generated automatically.",
 						},
+						"use_rds_data_api": {
+							Type:        schema.TypeBool,
+							Optional:    true,
+							Default:     false,
+							Description: "Enable RDS Aurora Data API transport. When enabled, cluster_arn and secret_arn are required.",
+						},
+						"cluster_arn": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							Description: "ARN of the RDS cluster for Data API access. Required when use_rds_data_api is true.",
+						},
+						"secret_arn": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							Description: "ARN of the Secrets Manager secret containing database credentials. Required when use_rds_data_api is true.",
+						},
 					},
 				},
 			},
@@ -315,6 +329,17 @@ func Provider() *schema.Provider {
 	}
 }
 
+func parseConnParams(d *schema.ResourceData, connParams map[string]string) error {
+	for k, vint := range d.Get("conn_params").(map[string]interface{}) {
+		v, ok := vint.(string)
+		if !ok {
+			return fmt.Errorf("cannot convert connection parameter %q to string", k)
+		}
+		connParams[k] = v
+	}
+	return nil
+}
+
 func buildAwsConfig(ctx context.Context, awsConfigBlock []interface{}) (aws.Config, error) {
 	if len(awsConfigBlock) == 0 || awsConfigBlock[0] == nil {
 		return awsConfig.LoadDefaultConfig(ctx)
@@ -378,17 +403,47 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var tlsConfigStruct *tls.Config
 	configKey := "default"
 
-	// Read aws_rds_iam_auth from aws_config block
+	// Read AWS config settings
 	var awsRdsIamAuth bool
+	var useRdsDataApi bool
+	var clusterArn string
+	var secretArn string
 	awsConfigBlock := d.Get("aws_config").([]interface{})
 	if len(awsConfigBlock) > 0 && awsConfigBlock[0] != nil {
 		config := awsConfigBlock[0].(map[string]interface{})
 		awsRdsIamAuth = config["aws_rds_iam_auth"].(bool)
+		useRdsDataApi = config["use_rds_data_api"].(bool)
+		clusterArn = config["cluster_arn"].(string)
+		secretArn = config["secret_arn"].(string)
 	}
 
-	// Validate: password must be empty when using AWS RDS IAM auth
+	// Validate AWS configuration
 	if awsRdsIamAuth && password != "" {
 		return nil, diag.Errorf("password must be empty when aws_rds_iam_auth is enabled in aws_config")
+	}
+
+	// Validate RDS Data API configuration
+	if useRdsDataApi {
+		if awsRdsIamAuth {
+			return nil, diag.Errorf("use_rds_data_api and aws_rds_iam_auth cannot both be enabled")
+		}
+		if clusterArn == "" {
+			return nil, diag.Errorf("cluster_arn is required when use_rds_data_api is true")
+		}
+		if secretArn == "" {
+			return nil, diag.Errorf("secret_arn is required when use_rds_data_api is true")
+		}
+		if password != "" {
+			return nil, diag.Errorf("password must be empty when use_rds_data_api is enabled")
+		}
+	} else {
+		// When not using RDS Data API, endpoint and username are required
+		if endpoint == "" {
+			return nil, diag.Errorf("endpoint is required when use_rds_data_api is false")
+		}
+		if username == "" {
+			return nil, diag.Errorf("username is required when use_rds_data_api is false")
+		}
 	}
 
 	customTLSMap := d.Get("custom_tls").([]interface{})
@@ -460,9 +515,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		// AWS RDS IAM authentication (both new and legacy)
 		log.Printf("[DEBUG] Using AWS RDS IAM authentication")
 
-		if strings.HasPrefix(endpoint, "aws://") {
-			endpoint = strings.TrimPrefix(endpoint, "aws://")
-		}
+		endpoint = strings.TrimPrefix(endpoint, "aws://")
 
 		// Configure for cleartext authentication (required for AWS RDS IAM)
 		allowClearTextPasswords = true
@@ -579,12 +632,34 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		password = azToken.Token
 	}
 
-	for k, vint := range d.Get("conn_params").(map[string]interface{}) {
-		v, ok := vint.(string)
-		if !ok {
-			return nil, diag.Errorf("cannot convert connection parameters to string")
+	// Parse connection parameters
+	if err := parseConnParams(d, connParams); err != nil {
+		return nil, diag.FromErr(err)
+	}
+
+	if useRdsDataApi {
+		awsConfigObj, err := buildAwsConfig(ctx, awsConfigBlock)
+		if err != nil {
+			return nil, diag.Errorf("failed to build AWS config for RDS Data API: %v", err)
 		}
-		connParams[k] = v
+
+		database := ""
+		if dbParam, ok := connParams["database"]; ok {
+			database = dbParam
+		}
+
+		rdsConfig := &rds.Config{
+			ResourceArn: clusterArn,
+			SecretArn:   secretArn,
+			Database:    database,
+			AWSRegion:   awsConfigObj.Region,
+			ParseTime:   true,
+		}
+
+		return &RDSDataAPIConfiguration{
+			Config:    rdsConfig,
+			AWSConfig: awsConfigObj,
+		}, nil
 	}
 
 	conf := mysql.Config{

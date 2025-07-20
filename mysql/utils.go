@@ -6,12 +6,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/go-sql-driver/mysql"
-	"google.golang.org/api/googleapi"
 	"log"
 	"sync"
 
+	"github.com/go-sql-driver/mysql"
+	"google.golang.org/api/googleapi"
+
+	"github.com/aws/aws-sdk-go-v2/service/rdsdata"
 	"github.com/hashicorp/go-version"
+	rds "github.com/krotscheck/go-rds-driver"
 )
 
 type KeyedMutex struct {
@@ -53,24 +56,48 @@ func hashSum(contents interface{}) string {
 }
 
 func getDatabaseFromMeta(ctx context.Context, meta interface{}) (*sql.DB, error) {
-	mysqlConf := meta.(*MySQLConfiguration)
-	oneConnection, err := connectToMySQLInternal(ctx, mysqlConf)
+	switch conf := meta.(type) {
+	case *MySQLConfiguration:
+		oneConnection, err := connectToMySQLInternal(ctx, conf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to MySQL: %v", err)
+		}
+		return oneConnection.Db, nil
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MySQL: %v", err)
+	case *RDSDataAPIConfiguration:
+		return connectToRDSDataAPI(ctx, conf)
+
+	default:
+		return nil, fmt.Errorf("unexpected configuration type: %T", meta)
 	}
-
-	return oneConnection.Db, nil
 }
 
 func getVersionFromMeta(ctx context.Context, meta interface{}) *version.Version {
-	mysqlConf := meta.(*MySQLConfiguration)
-	oneConnection, err := connectToMySQLInternal(ctx, mysqlConf)
-	if err != nil {
-		log.Panicf("getting DB got us error: %v", err)
-	}
+	switch conf := meta.(type) {
+	case *MySQLConfiguration:
+		oneConnection, err := connectToMySQLInternal(ctx, conf)
+		if err != nil {
+			log.Panicf("getting DB got us error: %v", err)
+		}
+		return oneConnection.Version
 
-	return oneConnection.Version
+	case *RDSDataAPIConfiguration:
+		db, err := getDatabaseFromMeta(ctx, meta)
+		if err != nil {
+			log.Panicf("getting DB got us error: %v", err)
+		}
+
+		ver, err := serverVersion(db)
+		if err != nil {
+			log.Panicf("getting version got us error: %v", err)
+		}
+
+		return ver
+
+	default:
+		log.Panicf("unexpected configuration type: %T", meta)
+		return nil
+	}
 }
 
 // 0 == not mysql error or not error at all.
@@ -98,4 +125,18 @@ func cloudsqlErrorNumber(err error) int {
 		}
 	}
 	return 0
+}
+
+func connectToRDSDataAPI(ctx context.Context, conf *RDSDataAPIConfiguration) (*sql.DB, error) {
+	rdsConnector := rds.NewConnector(rds.NewDriver(), rdsdata.NewFromConfig(conf.AWSConfig), conf.Config)
+
+	db := sql.OpenDB(rdsConnector)
+
+	err := db.PingContext(ctx)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping RDS Data API: %v", err)
+	}
+
+	return db, nil
 }

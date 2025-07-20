@@ -1,0 +1,22 @@
+version: '2.0'
+services:
+  mysql:
+    image: mariadb:10.2
+    hostname: mysql-test
+    container_name: mysql-test
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: supersecret
+      MYSQL_DATABASE: go_rds_driver_mysql
+    ports:
+      - "3306:3306"
+  postgresql:
+    image: postgres:13.14
+    hostname: postgresql-test
+    container_name: postgresql-test
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: supersecret
+      POSTGRES_DB: go_rds_driver_postgresql
+    ports:
+      - "5432:5432"

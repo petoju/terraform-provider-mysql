@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
@@ -55,10 +56,13 @@ func SetUserPassword(ctx context.Context, d *schema.ResourceData, meta interface
 		return diag.Errorf("failed getting UUID: %v", err)
 	}
 
+	var passwordStr string
 	password, passOk := d.GetOk("plaintext_password")
 	if !passOk {
-		password = uuid.String()
-		d.Set("plaintext_password", password)
+		passwordStr = uuid.String()
+		d.Set("plaintext_password", passwordStr)
+	} else {
+		passwordStr = password.(string)
 	}
 
 	retainPassword := d.Get("retain_old_password").(bool)
@@ -69,14 +73,16 @@ func SetUserPassword(ctx context.Context, d *schema.ResourceData, meta interface
 		}
 	}
 
-	stmtSQL, err := getSetPasswordStatement(ctx, meta, retainPassword)
+	stmtSQL, err := getSetPasswordStatement(ctx, meta, d.Get("user").(string), d.Get("host").(string), passwordStr, retainPassword)
 	if err != nil {
 		return diag.Errorf("failed getting password statement: %v", err)
 	}
-	_, err = db.ExecContext(ctx, stmtSQL,
-		d.Get("user").(string),
-		d.Get("host").(string),
-		password)
+
+	// Log with password redacted
+	logStmt := strings.Replace(stmtSQL, quoteString(passwordStr), "<SENSITIVE>", -1)
+	log.Println("[DEBUG] Executing statement:", logStmt)
+
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
 		return diag.Errorf("failed executing change statement: %v", err)
 	}

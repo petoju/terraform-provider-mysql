@@ -14,6 +14,25 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
+// formatUserIdentifier formats a user identifier with proper quoting for MySQL
+func formatUserIdentifier(user, host string) string {
+	return fmt.Sprintf("%s@%s", quoteIdentifier(user), quoteIdentifier(host))
+}
+
+// quoteString escapes and quotes a string literal for MySQL
+func quoteString(s string) string {
+	// MySQL string literals need to escape: backslash, single quote, double quote, null, newline, carriage return
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		`'`, `\'`,
+		`"`, `\"`,
+		"\x00", `\0`,
+		"\n", `\n`,
+		"\r", `\r`,
+	)
+	return fmt.Sprintf("'%s'", replacer.Replace(s))
+}
+
 func resourceUser() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: CreateUser,
@@ -202,22 +221,18 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	host := d.Get("host").(string)
 
 	var stmtSQL string
-	var args []interface{}
 
 	if createObj == "AADUSER" {
 		var aadIdentity = d.Get("aad_identity").(*schema.Set).List()[0].(map[string]interface{})
 		if aadIdentity["type"].(string) == "service_principal" {
 			// CREATE AADUSER 'mysqlProtocolLoginName"@"mysqlHostRestriction' IDENTIFIED BY 'identityId'
-			stmtSQL = "CREATE AADUSER ?@? IDENTIFIED BY ?"
-			args = []interface{}{user, host, aadIdentity["identity"].(string)}
+			stmtSQL = fmt.Sprintf("CREATE AADUSER %s IDENTIFIED BY %s", formatUserIdentifier(user, host), quoteString(aadIdentity["identity"].(string)))
 		} else {
 			// CREATE AADUSER 'identityName"@"mysqlHostRestriction' AS 'mysqlProtocolLoginName'
-			stmtSQL = "CREATE AADUSER ?@? AS ?"
-			args = []interface{}{aadIdentity["identity"].(string), host, user}
+			stmtSQL = fmt.Sprintf("CREATE AADUSER %s AS %s", formatUserIdentifier(aadIdentity["identity"].(string), host), quoteString(user))
 		}
 	} else {
-		stmtSQL = "CREATE USER ?@?"
-		args = []interface{}{user, host}
+		stmtSQL = fmt.Sprintf("CREATE USER %s", formatUserIdentifier(user, host))
 	}
 
 	var password string
@@ -232,17 +247,18 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	if authStm != "" {
-		stmtSQL += authStm
+		// Handle auth_string_hashed case
 		if hashed != "" {
-			args = append(args, hashed)
+			// authStm already contains " AS ?" from line 197
+			stmtSQL += strings.Replace(authStm, " AS ?", fmt.Sprintf(" AS %s", quoteString(hashed)), 1)
+		} else {
+			stmtSQL += authStm
 		}
 		if password != "" {
-			stmtSQL += " BY ?"
-			args = append(args, password)
+			stmtSQL += fmt.Sprintf(" BY %s", quoteString(password))
 		}
 	} else if password != "" {
-		stmtSQL += " IDENTIFIED BY ?"
-		args = append(args, password)
+		stmtSQL += fmt.Sprintf(" IDENTIFIED BY %s", quoteString(password))
 	}
 
 	requiredVersion, _ := version.NewVersion("5.7.0")
@@ -251,26 +267,24 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 	if getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) && d.Get("tls_option").(string) != "" {
 		if createObj == "AADUSER" {
-			updateStmtSql = "ALTER USER ?@? REQUIRE " + d.Get("tls_option").(string)
-			updateArgs = []interface{}{user, host}
+			updateStmtSql = fmt.Sprintf("ALTER USER %s REQUIRE %s", formatUserIdentifier(user, host), d.Get("tls_option").(string))
+			updateArgs = []interface{}{}
 		} else {
 			stmtSQL += " REQUIRE " + d.Get("tls_option").(string)
 		}
 	}
 
-	// Redact sensitive values in args for logging
-	redactedArgs := make([]interface{}, len(args))
-	for i, arg := range args {
-		if (password != "" && arg == password) || (hashed != "" && arg == hashed) {
-			redactedArgs[i] = "<SENSITIVE>"
-		} else {
-			redactedArgs[i] = arg
-		}
+	// Log statement with sensitive values redacted
+	logStmt := stmtSQL
+	if password != "" {
+		logStmt = strings.Replace(logStmt, quoteString(password), "<SENSITIVE>", -1)
 	}
+	if hashed != "" {
+		logStmt = strings.Replace(logStmt, quoteString(hashed), "<SENSITIVE>", -1)
+	}
+	log.Println("[DEBUG] Executing statement:", logStmt)
 
-	log.Println("[DEBUG] Executing statement:", stmtSQL, "args:", redactedArgs)
-
-	_, err = db.ExecContext(ctx, stmtSQL, args...)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
 		return diag.Errorf("failed executing SQL: %v", err)
 	}
@@ -290,18 +304,18 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	return nil
 }
 
-func getSetPasswordStatement(ctx context.Context, meta interface{}, retainPassword bool) (string, error) {
+func getSetPasswordStatement(ctx context.Context, meta interface{}, user, host, password string, retainPassword bool) (string, error) {
 	if retainPassword {
-		return "ALTER USER ?@? IDENTIFIED BY ? RETAIN CURRENT PASSWORD", nil
+		return fmt.Sprintf("ALTER USER %s IDENTIFIED BY %s RETAIN CURRENT PASSWORD", formatUserIdentifier(user, host), quoteString(password)), nil
 	}
 
 	/* ALTER USER syntax introduced in MySQL 5.7.6 deprecates SET PASSWORD (GH-8230) */
 	ver, _ := version.NewVersion("5.7.6")
 	if getVersionFromMeta(ctx, meta).LessThan(ver) {
-		return "SET PASSWORD FOR ?@? = PASSWORD(?)", nil
+		return fmt.Sprintf("SET PASSWORD FOR %s = PASSWORD(%s)", formatUserIdentifier(user, host), quoteString(password)), nil
 	}
 
-	return "ALTER USER ?@? IDENTIFIED BY ?", nil
+	return fmt.Sprintf("ALTER USER %s IDENTIFIED BY %s", formatUserIdentifier(user, host), quoteString(password)), nil
 }
 
 func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -331,9 +345,8 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 				}
 				authString = fmt.Sprintf("IDENTIFIED WITH %s AS 0x%s", d.Get("auth_plugin"), hexDigits)
 			}
-			stmtSQL = fmt.Sprintf("ALTER USER `%s`@`%s` %s  REQUIRE %s",
-				d.Get("user").(string),
-				d.Get("host").(string),
+			stmtSQL = fmt.Sprintf("ALTER USER %s %s  REQUIRE %s",
+				formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)),
 				authString,
 				d.Get("tls_option").(string))
 
@@ -352,9 +365,8 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 			return diag.Errorf("cannot use discard_old_password: %v", err)
 		} else {
 			var stmtSQL string
-			stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' DISCARD OLD PASSWORD",
-				d.Get("user").(string),
-				d.Get("host").(string))
+			stmtSQL = fmt.Sprintf("ALTER USER %s DISCARD OLD PASSWORD",
+				formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)))
 
 			log.Println("[DEBUG] Executing query:", stmtSQL)
 			_, err := db.ExecContext(ctx, stmtSQL)
@@ -382,16 +394,15 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	if newpw != nil {
-		stmtSQL, err := getSetPasswordStatement(ctx, meta, retainPassword)
+		stmtSQL, err := getSetPasswordStatement(ctx, meta, d.Get("user").(string), d.Get("host").(string), newpw.(string), retainPassword)
 		if err != nil {
 			return diag.Errorf("failed getting change password statement: %v", err)
 		}
 
-		log.Println("[DEBUG] Executing query:", stmtSQL)
-		_, err = db.ExecContext(ctx, stmtSQL,
-			d.Get("user").(string),
-			d.Get("host").(string),
-			newpw.(string))
+		// Log with password redacted
+		logStmt := strings.Replace(stmtSQL, quoteString(newpw.(string)), "<SENSITIVE>", -1)
+		log.Println("[DEBUG] Executing query:", logStmt)
+		_, err = db.ExecContext(ctx, stmtSQL)
 		if err != nil {
 			return diag.Errorf("failed changing password: %v", err)
 		}
@@ -401,9 +412,8 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	if d.HasChange("tls_option") && getVersionFromMeta(ctx, meta).GreaterThan(requiredVersion) {
 		var stmtSQL string
 
-		stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' REQUIRE %s",
-			d.Get("user").(string),
-			d.Get("host").(string),
+		stmtSQL = fmt.Sprintf("ALTER USER %s REQUIRE %s",
+			formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)),
 			d.Get("tls_option").(string))
 
 		log.Println("[DEBUG] Executing query:", stmtSQL)
@@ -429,9 +439,9 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 			// return diag.Errorf("failed setting print_identified_with_as_hex: %v", err)
 			log.Printf("[DEBUG] Could not set print_identified_with_as_hex: %v", err)
 		}
-		stmt := "SHOW CREATE USER ?@?"
+		stmt := fmt.Sprintf("SHOW CREATE USER %s", formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)))
 		var createUserStmt string
-		err = db.QueryRowContext(ctx, stmt, d.Get("user").(string), d.Get("host").(string)).Scan(&createUserStmt)
+		err = db.QueryRowContext(ctx, stmt).Scan(&createUserStmt)
 		if err != nil {
 			errorNumber := mysqlErrorNumber(err)
 			if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode {
@@ -542,13 +552,11 @@ func DeleteUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.FromErr(err)
 	}
 
-	stmtSQL := fmt.Sprintf("DROP USER ?@?")
+	stmtSQL := fmt.Sprintf("DROP USER %s", formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)))
 
 	log.Println("[DEBUG] Executing statement:", stmtSQL)
 
-	_, err = db.ExecContext(ctx, stmtSQL,
-		d.Get("user").(string),
-		d.Get("host").(string))
+	_, err = db.ExecContext(ctx, stmtSQL)
 
 	if err == nil {
 		d.SetId("")
