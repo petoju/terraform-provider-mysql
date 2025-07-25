@@ -12,7 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestTIDBResourceGroup_basic(t *testing.T) {
+func TestTIDBResourceGroup_basic_to_full(t *testing.T) {
 	varName := "rg100"
 	varResourceUnits := 100
 	varNewResourceUnits := 1000
@@ -47,6 +47,47 @@ func TestTIDBResourceGroup_basic(t *testing.T) {
 					resource.TestCheckResourceAttr(resourceName, "query_limit", varNewQueryLimit),
 					resource.TestCheckResourceAttr(resourceName, "burstable", fmt.Sprintf("%t", varBurstable)),
 					resource.TestCheckResourceAttr(resourceName, "priority", varPriority),
+				),
+			},
+		},
+	})
+}
+
+func TestTIDBResourceGroup_full_to_basic(t *testing.T) {
+	varName := "rg100"
+	varResourceUnits := 1000
+	varNewResourceUnits := 100
+	varQueryLimit := "EXEC_ELAPSED='15s', ACTION=COOLDOWN, WATCH=SIMILAR DURATION='10m0s'"
+	varNewQueryLimit := ""
+	varBurstable := true
+	varPriority := "low"
+	resourceName := "mysql_ti_resource_group.test"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipNotTiDB(t)
+			testAccPreCheckSkipNotTiDBVersionMin(t, ResourceGroupTiDBMinVersion)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccResourceGroupCheckDestroy(varName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccResourceGroupConfigFull(varName, varResourceUnits, varQueryLimit, varBurstable, varPriority),
+				Check: resource.ComposeTestCheckFunc(
+					testAccResourceGroupExists(varName),
+					resource.TestCheckResourceAttr(resourceName, "name", varName),
+					resource.TestCheckResourceAttr(resourceName, "query_limit", varQueryLimit),
+					resource.TestCheckResourceAttr(resourceName, "burstable", fmt.Sprintf("%t", varBurstable)),
+					resource.TestCheckResourceAttr(resourceName, "priority", varPriority),
+				),
+			},
+			{
+				Config: testAccResourceGroupConfigBasic(varName, varNewResourceUnits, varNewQueryLimit),
+				Check: resource.ComposeTestCheckFunc(
+					testAccResourceGroupExists(varName),
+					resource.TestCheckResourceAttr(resourceName, "name", varName),
+					resource.TestCheckResourceAttr(resourceName, "query_limit", varNewQueryLimit),
 				),
 			},
 		},

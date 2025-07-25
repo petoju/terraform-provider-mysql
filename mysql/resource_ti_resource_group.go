@@ -33,7 +33,9 @@ func (rg *ResourceGroup) buildSQLQuery(prefix string) string {
 
 	query = append(query, fmt.Sprintf(`PRIORITY = %s`, rg.Priority))
 
-	if rg.QueryLimit != DefaultResourceGroup.QueryLimit {
+	if rg.QueryLimit == "" {
+		query = append(query, fmt.Sprintf(`QUERY_LIMIT=NULL`))
+	} else {
 		query = append(query, fmt.Sprintf(`QUERY_LIMIT=(%s)`, rg.QueryLimit))
 	}
 
