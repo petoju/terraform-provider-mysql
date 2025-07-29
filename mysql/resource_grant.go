@@ -158,7 +158,7 @@ func (t *TablePrivilegeGrant) ConflictsWithGrant(other MySQLGrant) bool {
 // See: https://github.com/petoju/terraform-provider-mysql/issues/120
 func containsAllPrivilege(privileges []string) bool {
 	for _, p := range privileges {
-		if kReAllPrivileges.MatchString(p) {
+		if kReAllPrivileges.MatchString(strings.ToUpper(p)) {
 			return true
 		}
 	}
@@ -749,8 +749,7 @@ func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.Resource
 			d.Set("privileges", grantWithPriv.GetPrivileges())
 		} else {
 			currentPrivs := setToArray(currentPriv.(*schema.Set))
-			currentPrivs = normalizePerms(currentPrivs)
-			if !reflect.DeepEqual(currentPrivs, grantWithPriv.GetPrivileges()) {
+			if !arePrivilegesSetsEqual(currentPrivs, grantWithPriv.GetPrivileges()) {
 				d.Set("privileges", grantWithPriv.GetPrivileges())
 			}
 		}
@@ -1103,13 +1102,12 @@ func normalizePerms(perms []string) []string {
 	for _, perm := range perms {
 		// Remove leading and trailing backticks and spaces
 		permNorm := strings.Trim(perm, "` ")
-		permUcase := strings.ToUpper(permNorm)
 
 		// Normalize ALL and ALLPRIVILEGES to ALL PRIVILEGES
-		if kReAllPrivileges.MatchString(permUcase) {
-			permUcase = "ALL PRIVILEGES"
+		if kReAllPrivileges.MatchString(strings.ToUpper(permNorm)) {
+			permNorm = "ALL PRIVILEGES"
 		}
-		permSortedColumns := normalizeColumnOrder(permUcase)
+		permSortedColumns := normalizeColumnOrder(permNorm)
 
 		ret = append(ret, permSortedColumns)
 	}
@@ -1121,6 +1119,23 @@ func normalizePerms(perms []string) []string {
 	sort.Strings(ret)
 
 	return ret
+}
+
+func arePrivilegesSetsEqual(a, b []string) bool {
+	normA := normalizePerms(a)
+	normB := normalizePerms(b)
+
+	if len(normA) != len(normB) {
+		return false
+	}
+
+	for i := range normA {
+		if !strings.EqualFold(normA[i], normB[i]) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func setToArray(s interface{}) []string {
