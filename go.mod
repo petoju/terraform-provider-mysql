@@ -10,12 +10,14 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.29.14
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.67
 	github.com/aws/aws-sdk-go-v2/feature/rds/auth v1.5.11
+	github.com/aws/aws-sdk-go-v2/service/rdsdata v1.21.8
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.19
 	github.com/creasty/defaults v1.8.0
 	github.com/go-sql-driver/mysql v1.9.2
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/hashicorp/go-version v1.7.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.36.1
+	github.com/krotscheck/go-rds-driver v0.11.1
 	github.com/tidwall/gjson v1.18.0
 	golang.org/x/net v0.39.0
 	golang.org/x/oauth2 v0.29.0
@@ -38,7 +40,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.12.15 // indirect
-	github.com/aws/aws-sdk-go-v2/service/rdsdata v1.21.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.25.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.30.1 // indirect
 	github.com/aws/smithy-go v1.22.3 // indirect
@@ -74,7 +75,6 @@ require (
 	github.com/hashicorp/terraform-registry-address v0.2.5 // indirect
 	github.com/hashicorp/terraform-svchost v0.1.1 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
-	github.com/krotscheck/go-rds-driver v0.11.1 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
