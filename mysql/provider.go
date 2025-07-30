@@ -417,35 +417,6 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		secretArn = config["secret_arn"].(string)
 	}
 
-	// Validate AWS configuration
-	if awsRdsIamAuth && password != "" {
-		return nil, diag.Errorf("password must be empty when aws_rds_iam_auth is enabled in aws_config")
-	}
-
-	// Validate RDS Data API configuration
-	if useRdsDataApi {
-		if awsRdsIamAuth {
-			return nil, diag.Errorf("use_rds_data_api and aws_rds_iam_auth cannot both be enabled")
-		}
-		if clusterArn == "" {
-			return nil, diag.Errorf("cluster_arn is required when use_rds_data_api is true")
-		}
-		if secretArn == "" {
-			return nil, diag.Errorf("secret_arn is required when use_rds_data_api is true")
-		}
-		if password != "" {
-			return nil, diag.Errorf("password must be empty when use_rds_data_api is enabled")
-		}
-	} else {
-		// When not using RDS Data API, endpoint and username are required
-		if endpoint == "" {
-			return nil, diag.Errorf("endpoint is required when use_rds_data_api is false")
-		}
-		if username == "" {
-			return nil, diag.Errorf("username is required when use_rds_data_api is false")
-		}
-	}
-
 	customTLSMap := d.Get("custom_tls").([]interface{})
 	if len(customTLSMap) > 0 {
 		log.Printf("[DEBUG] Using custom TLS config")
