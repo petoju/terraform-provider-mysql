@@ -379,6 +379,14 @@ func resourceGrant() *schema.Resource {
 				Default:  false,
 			},
 
+			"ignore_roles": {
+				Type:     schema.TypeSet,
+				Optional: true,
+				// This set holds role names to ignore when reading state
+				Elem: &schema.Schema{Type: schema.TypeString},
+				Set:  schema.HashString,
+			},
+
 			"tls_option": {
 				Type:       schema.TypeString,
 				Optional:   true,
@@ -510,12 +518,25 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	grantCreateMutex.Lock(grant.GetUserOrRole().IDString())
 	defer grantCreateMutex.Unlock(grant.GetUserOrRole().IDString())
 
+	ignoredRoles := setToCaseInsensitiveMap(d.Get("ignore_roles"))
+
 	// Check to see if there are existing roles that might be clobbered by this grant
-	conflictingGrant, err := getMatchingGrant(ctx, db, grant)
+	conflictingGrant, err := getMatchingGrant(ctx, db, grant, ignoredRoles)
 	if err != nil {
 		return diag.Errorf("failed showing grants: %v", err)
 	}
 	if conflictingGrant != nil {
+		// If the existing grant found in the DB (cleansed by getMatchingGrant)
+		// EXACTLY matches the grant we want to create from HCL.
+		if reflect.DeepEqual(conflictingGrant, grant) {
+			log.Printf("[INFO] Grant for %#v already exists in desired state, skipping creation.", grant.GetUserOrRole())
+
+			// Register the ID and proceed to ReadGrant (success!)
+			d.SetId(grant.GetId())
+			return ReadGrant(ctx, d, meta)
+		}
+
+		// If they are NOT equal (e.g., privileges are mismatched), it's a true, unmanageable conflict.
 		return diag.Errorf("user/role %#v already has grant %v - ", grant.GetUserOrRole(), conflictingGrant)
 	}
 
@@ -542,7 +563,9 @@ func ReadGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) di
 		return diagErr
 	}
 
-	grantFromDb, err := getMatchingGrant(ctx, db, grantFromTf)
+	ignoredRoles := setToCaseInsensitiveMap(d.Get("ignore_roles"))
+
+	grantFromDb, err := getMatchingGrant(ctx, db, grantFromTf, ignoredRoles)
 	if err != nil {
 		return diag.Errorf("ReadGrant - getting all grants failed: %v", err)
 	}
@@ -803,23 +826,40 @@ func combineGrants(grantA MySQLGrant, grantB MySQLGrant) (MySQLGrant, error) {
 	return nil, fmt.Errorf("unable to combine MySQLGrant %s of type %T with %s of type %T", grantA, grantA, grantB, grantB)
 }
 
-func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) (MySQLGrant, error) {
+func isIgnoredRoleGrant(grant MySQLGrant, ignoredRoles map[string]struct{}) bool {
+	// Check if the grant is a RoleGrant type and has a non-empty set of roles
+	grantWithRoles, ok := grant.(MySQLGrantWithRoles)
+	if !ok || len(grantWithRoles.GetRoles()) == 0 {
+		return false // Not a role grant, or no roles granted
+	}
+
+	// Check if any of the roles granted are in the ignoredRoles map
+	for _, role := range grantWithRoles.GetRoles() {
+		// Roles in SHOW GRANTS output might be lowercase, so normalize the check
+		normalizedRole := strings.ToLower(strings.Trim(role, "`'"))
+		if _, exists := ignoredRoles[normalizedRole]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant, ignoredRoles map[string]struct{}) (MySQLGrant, error) {
 	allGrants, err := showUserGrants(ctx, db, desiredGrant.GetUserOrRole())
 	var result MySQLGrant
 	if err != nil {
 		return nil, fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
+
+	// Step 1: Combine all raw grants related to the target principal.
 	for _, dbGrant := range allGrants {
 
 		// Check if the grants cover the same user, table, database
 		// If not, continue
 		if !desiredGrant.ConflictsWithGrant(dbGrant) {
-			log.Printf("[DEBUG] Skipping grant %#v as it doesn't match %#v", dbGrant, desiredGrant)
 			continue
 		}
 
-		// For some reason, MySQL separates privileges into multiple lines
-		// So to normalize them, we need to combine them into a single MySQLGrant
 		if result != nil {
 			result, err = combineGrants(result, dbGrant)
 			if err != nil {
@@ -829,6 +869,57 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) 
 			result = dbGrant
 		}
 	}
+
+	// If no grants were found at all, return nil.
+	if result == nil {
+		return nil, nil
+	}
+
+	// Step 2: If this is a RoleGrant, filter out ignored roles and validate consistency.
+	if combinedRoleGrant, ok := result.(*RoleGrant); ok {
+		desiredRoleGrant := desiredGrant.(*RoleGrant)
+
+		// 2a. Determine the roles that are NOT ignored (i.e., the ones we MUST manage).
+		finalManagedRoles := []string{}
+
+		// Check every role found in the database (from the combined grant result)
+		for _, dbRole := range combinedRoleGrant.GetRoles() {
+			normalizedRole := strings.ToLower(dbRole)
+
+			// If the role is NOT in the ignoredRoles map, it's a managed role we need to keep.
+			if _, isIgnored := ignoredRoles[normalizedRole]; !isIgnored {
+				finalManagedRoles = append(finalManagedRoles, dbRole)
+			}
+		}
+
+		// 2b. Final Consistency Check: Compare the remaining managed roles against the HCL configuration.
+		desiredRolesNorm := normalizePerms(desiredRoleGrant.GetRoles())
+		managedRolesNorm := normalizePerms(finalManagedRoles)
+
+		if len(managedRolesNorm) == 0 {
+			// We already know the desired grant list is NOT empty (from parseResourceFromData).
+			// Therefore, if the found list is empty, the resource doesn't exist.
+			return nil, nil
+		}
+
+		// Check if the remaining, non-ignored roles exactly match what the HCL requested.
+		if !reflect.DeepEqual(desiredRolesNorm, managedRolesNorm) {
+			// If they don't match, we error out, indicating an unmanaged conflict (a role that should have been ignored was not, or vice versa).
+			return result, fmt.Errorf("user/role %s has grants that do not match the HCL configuration after ignoring roles (found: %v, desired: %v). Check for unexpected roles not in 'ignore_roles'.", desiredGrant.GetUserOrRole().IDString(), managedRolesNorm, desiredRolesNorm)
+		}
+
+		// 2c. Cleanse and Return: If consistent, create a NEW grant object with ONLY the managed roles.
+		// This is the clean object Terraform will store in its state.
+		finalGrant := &RoleGrant{
+			Roles:      finalManagedRoles,
+			Grant:      combinedRoleGrant.Grant,
+			UserOrRole: combinedRoleGrant.UserOrRole,
+			TLSOption:  combinedRoleGrant.TLSOption,
+		}
+		return finalGrant, nil
+	}
+
+	// Step 3: Return the raw result for non-role grants (table/procedure)
 	return result, nil
 }
 
@@ -1147,6 +1238,20 @@ func setToArray(s interface{}) []string {
 	ret := []string{}
 	for _, elem := range set.List() {
 		ret = append(ret, elem.(string))
+	}
+	return ret
+}
+
+// Converts a schema.Set of strings to a map for fast lookup
+func setToCaseInsensitiveMap(s interface{}) map[string]struct{} {
+	set, ok := s.(*schema.Set)
+	if !ok || set == nil {
+		return nil
+	}
+
+	ret := make(map[string]struct{})
+	for _, elem := range set.List() {
+		ret[strings.ToLower(elem.(string))] = struct{}{} // Use lowercase for comparison
 	}
 	return ret
 }

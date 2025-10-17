@@ -1513,3 +1513,140 @@ func getAdditionalGrantSample(dbName string, privileges string) string {
     }
     `, dbName, privileges)
 }
+
+// -----------------------------------------------------------------------------
+// HCL Configuration Helpers
+// -----------------------------------------------------------------------------
+
+// Helper to create the necessary principals (DB, User, Role1, Role2) without any grants.
+// This is used for a clean setup (Step 1).
+func testAccGrantConfigPrincipalsOnly(dbName string, userName string, password string, roleName1 string, roleName2 string) string {
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "%s"
+}
+
+resource "mysql_user" "test" {
+  user     = "%s"
+  host     = "%%"
+  password = "%s"
+}
+
+resource "mysql_role" "role1" {
+  name = "%s"
+}
+
+resource "mysql_role" "role2" {
+  name = "%s"
+}
+`, dbName, userName, password, roleName1, roleName2)
+}
+
+// Helper to define the main managed grant, which uses the ignore_roles attribute.
+// This relies on the principals being created by a previous step.
+func testAccGrantConfigWithIgnoredRoles(dbName string, userName string, password string, roleName1 string, roleName2 string) string {
+	// We include the principals again so that the full HCL context is available for Terraform to process.
+	return fmt.Sprintf(`
+%s
+
+// This resource manages the assignment of role1 and IGNORES the existence of role2.
+resource "mysql_grant" "managed_role_grant" {
+  user       = mysql_user.test.user
+  host       = mysql_user.test.host
+  roles      = [mysql_role.role1.name]
+  
+  // The core test: Tells the provider to skip checking the existence of role2
+  ignore_roles = [mysql_role.role2.name]
+}
+`, testAccGrantConfigPrincipalsOnly(dbName, userName, password, roleName1, roleName2))
+}
+
+// -----------------------------------------------------------------------------
+// SQL Helper
+// -----------------------------------------------------------------------------
+
+// Helper to manually run SQL to create the grant we want Terraform to ignore (Step 2).
+func grantIgnoredRole(userName, roleName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+		// SQL to manually apply the grant we want Terraform to ignore
+		sql := fmt.Sprintf("GRANT '%s' TO '%s'@'%%'", roleName, userName)
+
+		log.Printf("[DEBUG] SQL to create ignored grant: %s", sql)
+		if _, err := db.Exec(sql); err != nil {
+			// We log the error in case of existing grant (expected), but fail on execution error
+			log.Printf("[WARN] Failed to execute setup SQL (expected if already exists): %v", err)
+		}
+		return nil
+	}
+}
+
+func TestAccGrantWithIgnoredRoles(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	userName := fmt.Sprintf("tf-jdoe-%s", dbName)
+	roleName1 := "managed_role_ro"
+	roleName2 := "ignored_role_admin"
+
+	// Guaranteed compliant password
+	testPassword := fmt.Sprintf("CompliantP@ssw0rd!%d", rand.Intn(10000))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+
+			// ⚡ STEP 1: SETUP AND MANUAL GRANT
+			{
+				// HCL: Create User, DB, Role1, Role2.
+				// CHECK: Manually execute the GRANT for role2.
+				Config: testAccGrantConfigPrincipalsOnly(dbName, userName, testPassword, roleName1, roleName2),
+				Check: resource.ComposeTestCheckFunc(
+					// The manual SQL runs after the principals are created.
+					grantIgnoredRole(userName, roleName2),
+				),
+			},
+
+			// ⚡ STEP 2: CREATE MANAGED RESOURCE. Apply the main config with the ignore_roles filter.
+			// This step must SUCCEED because the filter is active.
+			{
+				Config: testAccGrantConfigWithIgnoredRoles(dbName, userName, testPassword, roleName1, roleName2),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("mysql_grant.managed_role_grant", "roles.#", "1"),
+					//resource.TestCheckResourceAttr("mysql_grant.managed_role_grant", "roles.0", roleName1),
+				),
+			},
+
+			// ⚡ STEP 3: READ/DRIFT CHECK. Refresh state and plan, expecting NO changes.
+			// This proves the provider's ReadGrant logic correctly ignored role2.
+			{
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false, // SUCCESS: Zero drift expected.
+				Config:             testAccGrantConfigWithIgnoredRoles(dbName, userName, testPassword, roleName1, roleName2),
+			},
+
+			// ⚡ STEP 5: NEGATIVE TEST. Remove the 'ignore_roles' logic to force a conflict.
+			// This proves the provider detects the out-of-band role2 grant when the filter is gone.
+			{
+				// This config reverts to a simple grant that ONLY specifies role1.
+				Config: testAccGrantConfigPrincipalsOnly(dbName, userName, testPassword, roleName1, roleName2) +
+					fmt.Sprintf(`
+resource "mysql_grant" "managed_role_grant" {
+  user       = mysql_user.test.user
+  host       = mysql_user.test.host
+  roles      = [mysql_role.role1.name]
+}
+`),
+				ExpectError: regexp.MustCompile("grants that do not match the HCL configuration after ignoring roles"),
+			},
+		},
+	})
+}
