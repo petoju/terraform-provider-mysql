@@ -1621,7 +1621,7 @@ func TestAccGrantWithIgnoredRoles(t *testing.T) {
 				Config: testAccGrantConfigWithIgnoredRoles(dbName, userName, testPassword, roleName1, roleName2),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("mysql_grant.managed_role_grant", "roles.#", "1"),
-					//resource.TestCheckResourceAttr("mysql_grant.managed_role_grant", "roles.0", roleName1),
+					resource.TestCheckResourceAttr("mysql_grant.managed_role_grant", "roles.0", roleName1),
 				),
 			},
 
@@ -1633,7 +1633,7 @@ func TestAccGrantWithIgnoredRoles(t *testing.T) {
 				Config:             testAccGrantConfigWithIgnoredRoles(dbName, userName, testPassword, roleName1, roleName2),
 			},
 
-			// ⚡ STEP 5: NEGATIVE TEST. Remove the 'ignore_roles' logic to force a conflict.
+			// ⚡ STEP 4: NEGATIVE TEST. Remove the 'ignore_roles' logic to force a conflict.
 			// This proves the provider detects the out-of-band role2 grant when the filter is gone.
 			{
 				// This config reverts to a simple grant that ONLY specifies role1.
