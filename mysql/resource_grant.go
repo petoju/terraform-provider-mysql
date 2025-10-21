@@ -526,17 +526,6 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		return diag.Errorf("failed showing grants: %v", err)
 	}
 	if conflictingGrant != nil {
-		// If the existing grant found in the DB (cleansed by getMatchingGrant)
-		// EXACTLY matches the grant we want to create from HCL.
-		if reflect.DeepEqual(conflictingGrant, grant) {
-			log.Printf("[INFO] Grant for %#v already exists in desired state, skipping creation.", grant.GetUserOrRole())
-
-			// Register the ID and proceed to ReadGrant (success!)
-			d.SetId(grant.GetId())
-			return ReadGrant(ctx, d, meta)
-		}
-
-		// If they are NOT equal (e.g., privileges are mismatched), it's a true, unmanageable conflict.
 		return diag.Errorf("user/role %#v already has grant %v - ", grant.GetUserOrRole(), conflictingGrant)
 	}
 
@@ -824,24 +813,6 @@ func combineGrants(grantA MySQLGrant, grantB MySQLGrant) (MySQLGrant, error) {
 	}
 
 	return nil, fmt.Errorf("unable to combine MySQLGrant %s of type %T with %s of type %T", grantA, grantA, grantB, grantB)
-}
-
-func isIgnoredRoleGrant(grant MySQLGrant, ignoredRoles map[string]struct{}) bool {
-	// Check if the grant is a RoleGrant type and has a non-empty set of roles
-	grantWithRoles, ok := grant.(MySQLGrantWithRoles)
-	if !ok || len(grantWithRoles.GetRoles()) == 0 {
-		return false // Not a role grant, or no roles granted
-	}
-
-	// Check if any of the roles granted are in the ignoredRoles map
-	for _, role := range grantWithRoles.GetRoles() {
-		// Roles in SHOW GRANTS output might be lowercase, so normalize the check
-		normalizedRole := strings.ToLower(strings.Trim(role, "`'"))
-		if _, exists := ignoredRoles[normalizedRole]; exists {
-			return true
-		}
-	}
-	return false
 }
 
 func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant, ignoredRoles map[string]struct{}) (MySQLGrant, error) {
