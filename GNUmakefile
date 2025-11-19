@@ -49,7 +49,9 @@ bin/terraform:
 testacc: fmtcheck bin/terraform
 	PATH="$(CURDIR)/bin:${PATH}" TF_ACC=1 go test $(TEST) -v $(TESTARGS) -timeout=90s
 
-acceptance: testversion5.6 testversion5.7 testversion8.0 testpercona5.7 testpercona8.0 testmariadb10.3 testmariadb10.8 testmariadb10.10 testtidb6.1.0 testtidb7.5.2
+# TiDB versions: latest of each minor series (must match .github/workflows/main.yml TIDB_VERSIONS)
+# 6.1.x → 6.1.7, 6.5.x → 6.5.12, 7.1.x → 7.1.6, 7.5.x → 7.5.7, 8.1.x → 8.1.2, 8.5.x → 8.5.3
+acceptance: testversion5.6 testversion5.7 testversion8.0 testpercona5.7 testpercona8.0 testmariadb10.3 testmariadb10.8 testmariadb10.10 testtidb6.1.7 testtidb6.5.12 testtidb7.1.6 testtidb7.5.7 testtidb8.1.2 testtidb8.5.3
 
 testversion%:
 	$(MAKE) MYSQL_VERSION=$* MYSQL_PORT=33$(shell echo "$*" | tr -d '.') testversion
@@ -82,16 +84,16 @@ testrdsdb:
 	$(MAKE) testacc
 
 testtidb%:
-	$(MAKE) MYSQL_VERSION=$* MYSQL_PORT=34$(shell echo "$*" | tr -d '.') testtidb
+	$(MAKE) MYSQL_VERSION=$* MYSQL_PORT=$(shell echo "$*" | awk -F. '{port=34000+($$2*100)+$$3; if(port>65535) port=34000+($$2*10)+$$3; printf "%d", port}') testtidb
 
 # WARNING: this does not work as a bare task run, it only instantiates correctly inside the versioned TiDB task run
 #          otherwise MYSQL_PORT and version are unset.
 testtidb:
-	@sh -c "'$(CURDIR)/scripts/tidb-test-cluster.sh' --init --port $(MYSQL_PORT) --version $(MYSQL_VERSION)"
-	@echo 'Waiting for TiDB...'
-	@while ! mysql -h 127.0.0.1 -P $(MYSQL_PORT) -u "$(TEST_USER)" -e 'SELECT 1' >/dev/null 2>&1; do printf '.'; sleep 1; done ; echo ; echo "Connected!"
-	MYSQL_USERNAME="$(TEST_USER)" MYSQL_PASSWORD="" MYSQL_ENDPOINT=127.0.0.1:$(MYSQL_PORT) $(MAKE) testacc
-	@sh -c "'$(CURDIR)/scripts/tidb-test-cluster.sh' --destroy"
+	@MYSQL_VERSION=$(MYSQL_VERSION) MYSQL_PORT=$(MYSQL_PORT) $(CURDIR)/scripts/tidb-test-cluster.sh --init --port $(MYSQL_PORT) --version $(MYSQL_VERSION) || exit 1
+	MYSQL_USERNAME="$(TEST_USER)" MYSQL_PASSWORD="" MYSQL_ENDPOINT=127.0.0.1:$(MYSQL_PORT) $(MAKE) testacc; \
+	TEST_RESULT=$$?; \
+	MYSQL_VERSION=$(MYSQL_VERSION) MYSQL_PORT=$(MYSQL_PORT) $(CURDIR)/scripts/tidb-test-cluster.sh --destroy || true; \
+	exit $$TEST_RESULT
 
 testmariadb%:
 	$(MAKE) MYSQL_VERSION=$* MYSQL_PORT=6$(shell echo "$*" | tr -d '.') testmariadb
@@ -166,5 +168,109 @@ tag:
 	@git tag -a v$(shell cat VERSION) -m v$(shell cat VERSION)
 
 release:
-	@goreleaser release --clean --verbose
-.PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile website website-test tag format-tag
+	@VERSION=$$(cat VERSION); \
+	TAG="v$$VERSION"; \
+	echo "Checking if tag $$TAG already exists..."; \
+	if git rev-parse "$$TAG" >/dev/null 2>&1; then \
+		echo "Tag $$TAG already exists!"; \
+		echo "Current version from VERSION file: $$VERSION"; \
+		\
+		LAST_TAG=$$(git tag --list "v*" | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+" | sort -V | tail -1); \
+		if [ -n "$$LAST_TAG" ]; then \
+			LAST_VERSION=$${LAST_TAG#v}; \
+			echo "Most recent tag: $$LAST_TAG (version: $$LAST_VERSION)"; \
+			\
+			MAJOR_MINOR=$$(echo "$$LAST_VERSION" | sed -E 's/\.[0-9]+$$//'); \
+			BUILD_NUM=$$(echo "$$LAST_VERSION" | sed -E 's/.*\.([0-9]+)$$/\1/'); \
+			NEXT_BUILD=$$((BUILD_NUM + 1)); \
+			NEXT_VERSION="$$MAJOR_MINOR.$$NEXT_BUILD"; \
+			NEXT_TAG="v$$NEXT_VERSION"; \
+			\
+			echo ""; \
+			echo "Suggested next tag: $$NEXT_TAG"; \
+			echo -n "Enter next tag (or press Enter to use $$NEXT_TAG): "; \
+			read USER_TAG; \
+			if [ -z "$$USER_TAG" ]; then \
+				USER_TAG="$$NEXT_TAG"; \
+			fi; \
+			if [ "$${USER_TAG#v}" = "$$USER_TAG" ]; then \
+				TAG="v$$USER_TAG"; \
+			else \
+				TAG="$$USER_TAG"; \
+			fi; \
+			VERSION=$${TAG#v}; \
+		else \
+			echo "Could not determine next tag. Please enter manually:"; \
+			read -p "Enter next tag: " USER_TAG; \
+			if [ "$${USER_TAG#v}" = "$$USER_TAG" ]; then \
+				TAG="v$$USER_TAG"; \
+			else \
+				TAG="$$USER_TAG"; \
+			fi; \
+			VERSION=$${TAG#v}; \
+		fi; \
+	else \
+		echo "Tag $$TAG does not exist. Using version from VERSION file: $$VERSION"; \
+	fi; \
+	\
+	ORIGINAL_VERSION=$$(cat VERSION); \
+	if [ "$$VERSION" != "$$ORIGINAL_VERSION" ]; then \
+		echo ""; \
+		echo "Updating VERSION file from $$ORIGINAL_VERSION to $$VERSION..."; \
+		echo "$$VERSION" > VERSION; \
+		echo "VERSION file updated."; \
+	fi; \
+	\
+	echo ""; \
+	echo "========================================="; \
+	echo "Release Summary:"; \
+	echo "  Tag: $$TAG"; \
+	echo "  Version: $$VERSION"; \
+	echo "========================================="; \
+	echo ""; \
+	echo -n "Do you want to create tag $$TAG? (yes/no): "; \
+	read CONFIRM_TAG; \
+	if [ "$$CONFIRM_TAG" != "yes" ]; then \
+		echo "Tag creation cancelled."; \
+		exit 1; \
+	fi; \
+	\
+	echo ""; \
+	echo "Creating tag $$TAG..."; \
+	if [ "$$VERSION" != "$$ORIGINAL_VERSION" ]; then \
+		git add VERSION || exit 1; \
+		git commit -m "Update VERSION to $$VERSION" || exit 1; \
+		echo "VERSION file change committed."; \
+	fi; \
+	git tag -a "$$TAG" -m "$$TAG" || exit 1; \
+	echo "Tag $$TAG created successfully."; \
+	\
+	echo ""; \
+	echo -n "Do you want to deploy this as a GitHub release? (yes/no): "; \
+	read CONFIRM_RELEASE; \
+	if [ "$$CONFIRM_RELEASE" != "yes" ]; then \
+		echo "GitHub release cancelled. Tag created but not released."; \
+		echo "You can release it later with: goreleaser release --clean"; \
+		exit 0; \
+	fi; \
+	\
+	echo ""; \
+	echo "Running goreleaser to create GitHub release..."; \
+	goreleaser release --clean --verbose || exit 1; \
+	\
+	echo ""; \
+	echo -n "Do you want to push tags and commits to GitHub? (yes/no): "; \
+	read CONFIRM_PUSH; \
+	if [ "$$CONFIRM_PUSH" != "yes" ]; then \
+		echo "Push cancelled. Tag and release created locally."; \
+		exit 0; \
+	fi; \
+	\
+	echo ""; \
+	echo "Pushing to GitHub..."; \
+	git push origin --tags || exit 1; \
+	git push origin HEAD || exit 1; \
+	echo ""; \
+	echo "Release complete! Tag $$TAG has been pushed to GitHub."
+
+.PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile website website-test tag format-tag release

@@ -1,0 +1,7 @@
+# Minimal Dockerfile for pulling and caching MySQL images
+# This file is dynamically used by the workflow to pull images via Buildx
+
+ARG MYSQL_IMAGE
+FROM ${MYSQL_IMAGE}
+
+# No additional layers needed - just pulling the base image for caching

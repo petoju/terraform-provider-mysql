@@ -102,7 +102,16 @@ function destroy_cluster() {
 }
 
 function show_docker_logs_and_exit() {
-	docker ps -a -q -f name=$1 |xargs docker logs --details 2>&1
+	CONTAINERS=$(docker ps -a -q -f name=$1)
+	if [ ! -z "$CONTAINERS" ]; then
+		echo "=== Container logs for $1 ==="
+		echo "$CONTAINERS" | xargs docker logs --details 2>&1 || true
+	else
+		echo "No container found for $1 - container may have failed to start"
+		echo "Checking if Docker image exists..."
+		docker images pingcap/$1:$TAG_VERSION || echo "Image pingcap/$1:$TAG_VERSION not found locally"
+	fi
+	echo ""
 	echo "Error with $1 component. For debugging use:"
 	echo "docker ps -a -q -f name=$1 |xargs docker logs"
 	exit 1
@@ -110,7 +119,7 @@ function show_docker_logs_and_exit() {
 
 function run_pd() {
 	echo "==> Pulling up PD component"
-	${DOCKER} run -d --name pd \
+	if ! ${DOCKER} run -d --name pd \
 		-v /etc/localtime:/etc/localtime:ro \
 		-h pd \
 		--network "$DOCKER_NETWORK" \
@@ -121,12 +130,15 @@ function run_pd() {
 		--advertise-client-urls="http://pd:2379" \
 		--peer-urls="http://0.0.0.0:2380" \
 		--advertise-peer-urls="http://pd:2380" \
-		--initial-cluster="pd=http://pd:2380" >/dev/null 2>&1 || show_docker_logs_and_exit pd
+		--initial-cluster="pd=http://pd:2380" 2>&1; then
+		echo "ERROR: Failed to start PD container"
+		show_docker_logs_and_exit pd
+	fi
 }
 
 function run_tikv() {
 	echo "==> Pulling up TiKV component"
-	${DOCKER} run -d --name tikv \
+	if ! ${DOCKER} run -d --name tikv \
 		-v /etc/localtime:/etc/localtime:ro \
 		-h tikv \
 		--network "$DOCKER_NETWORK" \
@@ -135,13 +147,16 @@ function run_tikv() {
 		--advertise-addr="tikv:20160" \
 		--status-addr="0.0.0.0:20180" \
 		--data-dir="/data" \
-		--pd="pd:2379" >/dev/null 2>&1 || show_docker_logs_and_exit tikv
+		--pd="pd:2379" 2>&1; then
+		echo "ERROR: Failed to start TiKV container"
+		show_docker_logs_and_exit tikv
+	fi
 }
 
 function run_tidb() {
 	local _mysql_port=$1
 	echo "==> Pulling up TiDB component"
-	${DOCKER} run -d --name tidb \
+	if ! ${DOCKER} run -d --name tidb \
 		-p $_mysql_port:$_mysql_port \
 		-v /etc/localtime:/etc/localtime:ro \
 		-h tidb \
@@ -149,7 +164,10 @@ function run_tidb() {
 		pingcap/tidb:$TAG_VERSION \
 		--store=tikv \
 		-P $_mysql_port \
-		--path="pd:2379" >/dev/null 2>&1 || show_docker_logs_and_exit tidb
+		--path="pd:2379" 2>&1; then
+		echo "ERROR: Failed to start TiDB container"
+		show_docker_logs_and_exit tidb
+	fi
 }
 
 function main() {

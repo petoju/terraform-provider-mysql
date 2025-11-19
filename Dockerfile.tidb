@@ -1,0 +1,8 @@
+# Minimal Dockerfile for pulling and caching TiDB component images
+# This file is dynamically used by the workflow to pull images via Buildx
+
+ARG TIDB_COMPONENT
+ARG TIDB_VERSION
+FROM ${TIDB_COMPONENT}:${TIDB_VERSION}
+
+# No additional layers needed - just pulling the base image for caching
