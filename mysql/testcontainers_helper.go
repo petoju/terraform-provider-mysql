@@ -1,5 +1,9 @@
 // +build testcontainers
 
+// Suppress warnings from go-m1cpu dependency
+// These are harmless compiler warnings from CGO code in a third-party package
+//go:build testcontainers
+
 package mysql
 
 import (

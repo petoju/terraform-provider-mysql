@@ -1,0 +1,15 @@
+# GolangCI-Lint configuration
+# Suppress warnings from testcontainers dependencies
+
+linters-settings:
+  gci:
+    # Suppress warnings from third-party packages
+    skip-generated: true
+
+issues:
+  exclude-rules:
+    # Suppress warnings from go-m1cpu (testcontainers dependency)
+    - path: _test\.go
+      linters:
+        - gocritic
+      text: ".*go-m1cpu.*"

@@ -90,6 +90,26 @@ func TestAccDataSourceDatabases_WithTestcontainers(t *testing.T) {
 
 ## Troubleshooting
 
+### Compiler Warnings
+
+You may see warnings like:
+```
+warning: variable length array folded to constant array as an extension [-Wgnu-folding-constant]
+```
+
+These are harmless warnings from the `go-m1cpu` dependency (used by testcontainers-go). They don't affect functionality. To suppress them:
+
+```bash
+export CGO_CFLAGS="-Wno-gnu-folding-constant"
+go test -tags=testcontainers -v ./mysql/...
+```
+
+Or use the provided script:
+```bash
+source .testcontainers-build-flags.sh
+go test -tags=testcontainers -v ./mysql/...
+```
+
 ### Container Won't Start
 
 - Check Docker/Podman is running: `docker ps` or `podman ps`
