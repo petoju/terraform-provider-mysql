@@ -33,6 +33,7 @@ Makefile target → Docker run → Wait loop → Set env vars → Run tests → 
 6. **Better Error Messages**: Container logs automatically captured on failure
 7. **Type Safety**: Compile-time checks instead of runtime shell errors
 8. **Simpler CI/CD**: Just run `go test` - no Makefile coordination needed
+9. **Podman Support**: Works with Podman without special configuration (daemonless, rootless)
 
 ## Proof of Concept
 
@@ -426,7 +427,7 @@ func TestAccDatabase_MultipleVersions(t *testing.T) {
 
 1. **TiDB Complexity**: Multi-container setup still complex, but better than shell scripts
 2. **Learning Curve**: Team needs to learn Testcontainers API
-3. **Docker Dependency**: Still requires Docker (same as current approach)
+3. **Container Runtime Dependency**: Requires Docker or Podman (same as current approach)
 4. **Migration Effort**: Need to convert all tests
 
 ### Potential Issues
@@ -440,6 +441,38 @@ func TestAccDatabase_MultipleVersions(t *testing.T) {
 3. **Network Issues**: Docker networking complexity
    - **Mitigation**: Testcontainers handles this automatically
 
+## Podman Support
+
+Testcontainers Go automatically detects and works with Podman when Docker is not available or when `TESTCONTAINERS_RYUK_DISABLED=true` is set. Podman support is transparent - no code changes needed.
+
+### Podman Benefits
+
+1. **Rootless**: Can run without root privileges
+2. **Daemonless**: No background daemon required
+3. **Drop-in Replacement**: API-compatible with Docker
+4. **Better Security**: Uses user namespaces
+
+### Podman Configuration
+
+Testcontainers will automatically use Podman if:
+- Docker is not available, OR
+- `CONTAINER_HOST` environment variable points to Podman socket
+
+Example:
+```bash
+# Use Podman explicitly
+export CONTAINER_HOST=unix://$HOME/.local/share/containers/podman/machine/podman-machine-default/podman.sock
+
+# Or let Testcontainers auto-detect
+# (it will try Docker first, then Podman)
+```
+
+### Podman Considerations
+
+- **Socket Path**: Podman socket location varies by installation
+- **Rootless Mode**: May have different networking behavior
+- **Compose Support**: Docker Compose module may not work with Podman (use manual multi-container setup for TiDB)
+
 ## Implementation Plan
 
 ### Step 1: Add Dependencies
@@ -448,6 +481,15 @@ func TestAccDatabase_MultipleVersions(t *testing.T) {
 go get github.com/testcontainers/testcontainers-go
 go get github.com/testcontainers/testcontainers-go/modules/mysql
 go get github.com/testcontainers/testcontainers-go/modules/compose
+```
+
+### Step 1.5: Verify Podman Support (Optional)
+
+Test Podman compatibility:
+```bash
+# With Podman installed
+export CONTAINER_HOST=unix://$HOME/.local/share/containers/podman/machine/podman-machine-default/podman.sock
+go test -tags=spike ./mysql/... -run ExampleTestAccDatabase_WithTestcontainers
 ```
 
 ### Step 2: Create Helper Package
@@ -499,9 +541,43 @@ Convert tests file-by-file:
 4. **Decide on migration strategy** (gradual vs. all-at-once)
 5. **Create migration tickets** if approved
 
+## Podman-Specific Implementation Notes
+
+### TiDB with Podman
+
+Since Docker Compose may not work with Podman, use manual multi-container setup:
+
+```go
+func startTiDBClusterPodman(ctx context.Context, t *testing.T, version string) *MySQLTestContainer {
+    // Use GenericContainer instead of Compose module
+    // This works with both Docker and Podman
+    return startTiDBClusterManual(ctx, t, version)
+}
+```
+
+### Testing Podman Compatibility
+
+Add a build tag to test Podman specifically:
+
+```go
+// +build podman
+
+// Test with Podman
+func TestPodmanCompatibility(t *testing.T) {
+    // Verify Testcontainers detects Podman
+    // Run subset of tests to verify compatibility
+}
+```
+
+Run with:
+```bash
+go test -tags=podman ./mysql/...
+```
+
 ## References
 
 - [Testcontainers Go Documentation](https://golang.testcontainers.org/)
 - [Testcontainers MySQL Module](https://golang.testcontainers.org/modules/mysql/)
 - [Testcontainers Compose Module](https://golang.testcontainers.org/modules/compose/)
+- [Testcontainers Podman Support](https://golang.testcontainers.org/features/container_daemons/)
 - [Example: Terraform Provider Testing](https://github.com/testcontainers/testcontainers-go/tree/main/examples)
