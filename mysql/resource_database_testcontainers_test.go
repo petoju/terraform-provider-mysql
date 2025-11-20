@@ -1,3 +1,4 @@
+//go:build testcontainers
 // +build testcontainers
 
 package mysql
@@ -12,12 +13,10 @@ import (
 
 // TestAccDatabase_WithTestcontainers is a proof of concept test
 // using Testcontainers instead of Makefile + Docker
+// Uses shared container set up in TestMain
 func TestAccDatabase_WithTestcontainers(t *testing.T) {
-	ctx := context.Background()
-
-	// Start MySQL container using Testcontainers
-	container := startMySQLContainer(ctx, t, "mysql:8.0")
-	defer container.SetupTestEnv(t)()
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
 
 	dbName := "terraform_acceptance_test"
 	resource.Test(t, resource.TestCase{
@@ -43,12 +42,10 @@ func TestAccDatabase_WithTestcontainers(t *testing.T) {
 }
 
 // TestAccDatabase_collationChange_WithTestcontainers tests collation changes
+// Uses shared container set up in TestMain
 func TestAccDatabase_collationChange_WithTestcontainers(t *testing.T) {
-	ctx := context.Background()
-
-	// Start MySQL container using Testcontainers
-	container := startMySQLContainer(ctx, t, "mysql:8.0")
-	defer container.SetupTestEnv(t)()
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
 
 	dbName := "terraform_acceptance_test"
 
@@ -77,6 +74,7 @@ func TestAccDatabase_collationChange_WithTestcontainers(t *testing.T) {
 			},
 			{
 				PreConfig: func() {
+					ctx := context.Background()
 					db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
 					if err != nil {
 						return

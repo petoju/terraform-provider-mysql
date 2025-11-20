@@ -1,21 +1,25 @@
+//go:build testcontainers
+// +build testcontainers
+
 package mysql
 
 import (
 	"context"
-	"database/sql"
-	"errors"
-	"fmt"
-	"log"
 	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccUser_basic(t *testing.T) {
+// TestAccUser_basic_WithTestcontainers tests the mysql_user resource
+// using Testcontainers instead of Makefile + Docker
+// Uses shared container set up in TestMain
+func TestAccUser_basic_WithTestcontainers(t *testing.T) {
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
+
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t) },
+		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviderFactories,
 		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
@@ -53,14 +57,18 @@ func TestAccUser_basic(t *testing.T) {
 	})
 }
 
-func TestAccUser_auth(t *testing.T) {
+// TestAccUser_auth_WithTestcontainers tests auth plugin functionality
+// Requires MySQL (not TiDB/MariaDB/RDS) with mysql_no_login plugin
+// Uses shared container set up in TestMain
+// Note: mysql_no_login plugin may not be available in all MySQL distributions
+func TestAccUser_auth_WithTestcontainers(t *testing.T) {
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
+
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
-			testAccPreCheckSkipTiDB(t)
-			testAccPreCheckSkipMariaDB(t)
-			testAccPreCheckSkipRds(t)
+			testAccPreCheck(t)
 			// Check if mysql_no_login plugin is available
-			// This plugin may not be available in all MySQL distributions
 			ctx := context.Background()
 			db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
 			if err != nil {
@@ -109,13 +117,15 @@ func TestAccUser_auth(t *testing.T) {
 	})
 }
 
-func TestAccUser_authConnect(t *testing.T) {
+// TestAccUser_authConnect_WithTestcontainers tests password authentication
+// Requires MySQL (not TiDB/MariaDB/RDS)
+// Uses shared container set up in TestMain
+func TestAccUser_authConnect_WithTestcontainers(t *testing.T) {
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
+
 	resource.Test(t, resource.TestCase{
-		PreCheck: func() {
-			testAccPreCheckSkipTiDB(t)
-			testAccPreCheckSkipMariaDB(t)
-			testAccPreCheckSkipRds(t)
-		},
+		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviderFactories,
 		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
@@ -149,13 +159,15 @@ func TestAccUser_authConnect(t *testing.T) {
 	})
 }
 
-func TestAccUser_authConnectRetainOldPassword(t *testing.T) {
+// TestAccUser_authConnectRetainOldPassword_WithTestcontainers tests retain_old_password
+// Requires MySQL 8.0.14+
+// Uses shared container set up in TestMain
+func TestAccUser_authConnectRetainOldPassword_WithTestcontainers(t *testing.T) {
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
+
 	resource.Test(t, resource.TestCase{
-		PreCheck: func() {
-			testAccPreCheckSkipMariaDB(t)
-			testAccPreCheckSkipRds(t)
-			testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.14")
-		},
+		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviderFactories,
 		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
@@ -183,7 +195,12 @@ func TestAccUser_authConnectRetainOldPassword(t *testing.T) {
 	})
 }
 
-func TestAccUser_deprecated(t *testing.T) {
+// TestAccUser_deprecated_WithTestcontainers tests deprecated password attribute
+// Uses shared container set up in TestMain
+func TestAccUser_deprecated_WithTestcontainers(t *testing.T) {
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviderFactories,
@@ -210,199 +227,3 @@ func TestAccUser_deprecated(t *testing.T) {
 		},
 	})
 }
-
-func testAccUserExists(rn string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[rn]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", rn)
-		}
-
-		if rs.Primary.ID == "" {
-			return fmt.Errorf("user id not set")
-		}
-
-		ctx := context.Background()
-		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
-		if err != nil {
-			return err
-		}
-
-		stmtSQL := fmt.Sprintf("SELECT count(*) from mysql.user where CONCAT(user, '@', host) = '%s'", rs.Primary.ID)
-		log.Println("[DEBUG] Executing statement:", stmtSQL)
-		var count int
-		err = db.QueryRow(stmtSQL).Scan(&count)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("expected 1 row reading user but got no rows")
-			}
-			return fmt.Errorf("error reading user: %s", err)
-		}
-
-		return nil
-	}
-}
-
-func testAccUserAuthExists(rn string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[rn]
-		if !ok {
-			return fmt.Errorf("resource not found: %s", rn)
-		}
-
-		if rs.Primary.ID == "" {
-			return fmt.Errorf("user id not set")
-		}
-
-		ctx := context.Background()
-		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
-		if err != nil {
-			return err
-		}
-
-		stmtSQL := fmt.Sprintf("SELECT count(*) from mysql.user where CONCAT(user, '@', host) = '%s' and plugin = 'mysql_no_login'", rs.Primary.ID)
-		log.Println("[DEBUG] Executing statement:", stmtSQL)
-		var count int
-		err = db.QueryRow(stmtSQL).Scan(&count)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("expected 1 row reading user but got no rows")
-			}
-			return fmt.Errorf("error reading user: %s", err)
-		}
-
-		return nil
-	}
-}
-
-func testAccUserAuthValid(user string, password string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		userConf := testAccProvider.Meta().(*MySQLConfiguration)
-		userConf.Config.User = user
-		userConf.Config.Passwd = password
-
-		ctx := context.Background()
-		connection, err := createNewConnection(ctx, userConf)
-		if err != nil {
-			return fmt.Errorf("could not create new connection: %v", err)
-		}
-
-		connection.Db.Close()
-
-		return nil
-	}
-}
-
-func testAccUserCheckDestroy(s *terraform.State) error {
-	ctx := context.Background()
-	db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
-	if err != nil {
-		return err
-	}
-
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "mysql_user" {
-			continue
-		}
-
-		stmtSQL := fmt.Sprintf("SELECT user from mysql.user where CONCAT(user, '@', host) = '%s'", rs.Primary.ID)
-		log.Println("[DEBUG] Executing statement:", stmtSQL)
-		rows, err := db.Query(stmtSQL)
-		if err != nil {
-			return fmt.Errorf("error issuing query: %s", err)
-		}
-		haveNext := rows.Next()
-		rows.Close()
-		if haveNext {
-			return fmt.Errorf("user still exists after destroy")
-		}
-	}
-	return nil
-}
-
-const testAccUserConfig_basic = `
-resource "mysql_user" "test" {
-    user = "jdoe"
-    host = "%"
-    plaintext_password = "password"
-}
-`
-
-const testAccUserConfig_ssl = `
-resource "mysql_user" "test" {
-	user = "jdoe"
-	host = "example.com"
-	plaintext_password = "password"
-	tls_option = "SSL"
-}
-`
-
-const testAccUserConfig_newPass = `
-resource "mysql_user" "test" {
-    user = "jdoe"
-    host = "%"
-    plaintext_password = "password2"
-}
-`
-
-const testAccUserConfig_deprecated = `
-resource "mysql_user" "test" {
-    user = "jdoe"
-    host = "example.com"
-    password = "password"
-}
-`
-
-const testAccUserConfig_deprecated_newPass = `
-resource "mysql_user" "test" {
-    user = "jdoe"
-    host = "example.com"
-    password = "password2"
-}
-`
-
-const testAccUserConfig_auth_iam_plugin = `
-resource "mysql_user" "test" {
-    user        = "jdoe"
-    host        = "example.com"
-    auth_plugin = "mysql_no_login"
-}
-`
-
-const testAccUserConfig_auth_native = `
-resource "mysql_user" "test" {
-    user        = "jdoe"
-    host        = "example.com"
-    auth_plugin = "mysql_native_password"
-
-    # Hash of "password"
-    auth_string_hashed = "*2470C0C06DEE42FD1618BB99005ADCA2EC9D1E19"
-}
-`
-
-const testAccUserConfig_basic_retain_old_password = `
-resource "mysql_user" "test" {
-    user = "jdoe"
-    host = "%"
-    plaintext_password = "password"
-    retain_old_password = true
-}
-`
-
-const testAccUserConfig_newPass_retain_old_password = `
-resource "mysql_user" "test" {
-    user = "jdoe"
-    host = "%"
-    plaintext_password = "password2"
-    retain_old_password = true
-}
-`
-
-const testAccUserConfig_newNewPass_retain_old_password = `
-resource "mysql_user" "test" {
-    user = "jdoe"
-    host = "%"
-    plaintext_password = "password3"
-    retain_old_password = true
-}
-`

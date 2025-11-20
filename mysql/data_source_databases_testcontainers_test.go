@@ -1,9 +1,9 @@
+//go:build testcontainers
 // +build testcontainers
 
 package mysql
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -12,12 +12,10 @@ import (
 
 // TestAccDataSourceDatabases_WithTestcontainers is a proof of concept test
 // using Testcontainers instead of Makefile + Docker
+// Uses shared container set up in TestMain
 func TestAccDataSourceDatabases_WithTestcontainers(t *testing.T) {
-	ctx := context.Background()
-	
-	// Start MySQL container using Testcontainers
-	container := startMySQLContainer(ctx, t, "mysql:8.0")
-	defer container.SetupTestEnv(t)()
+	// Use shared container set up in TestMain
+	_ = getSharedMySQLContainer(t, "mysql:8.0")
 
 	// Run the same test logic as the original test
 	resource.Test(t, resource.TestCase{

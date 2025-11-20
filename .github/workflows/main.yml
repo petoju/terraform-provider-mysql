@@ -40,10 +40,10 @@ jobs:
         run: |
           # Extract TiDB versions from test matrix and compare with env.TIDB_VERSIONS
           EXPECTED_VERSIONS="${{ env.TIDB_VERSIONS }}"
-          MATRIX_VERSIONS=$(grep -E "testtidb[0-9]" .github/workflows/main.yml | sed 's/.*testtidb\([0-9.]*\).*/\1/' | tr '\n' ' ' | xargs)
+          MATRIX_VERSIONS=$(grep -A 20 "db_type: tidb" .github/workflows/main.yml | grep "db_version:" | sed 's/.*db_version: "\([0-9.]*\)".*/\1/' | tr '\n' ' ' | xargs)
           
           echo "Expected versions (from env): $EXPECTED_VERSIONS"
-          echo "Matrix versions (from test targets): $MATRIX_VERSIONS"
+          echo "Matrix versions (from workflow): $MATRIX_VERSIONS"
           
           # Check if versions match (simple check - both should contain same versions)
           MISSING=""
@@ -55,7 +55,7 @@ jobs:
           
           if [ -n "$MISSING" ]; then
             echo "ERROR: TiDB versions in env.TIDB_VERSIONS not found in test matrix: $MISSING"
-            echo "Please ensure test matrix includes testtidb* entries for all versions in env.TIDB_VERSIONS"
+            echo "Please ensure test matrix includes tidb entries for all versions in env.TIDB_VERSIONS"
             exit 1
           fi
           
@@ -75,22 +75,8 @@ jobs:
       - name: Vendor Go dependencies
         run: go mod vendor
       
-      # Note: TiDB tests now use Docker images with Buildx caching instead of TiUP
-      # Docker images are cached per version in individual test jobs using Buildx with GHA cache backend
-      # Each test job pulls and caches its own images - no pre-pull needed since Docker layer cache is ephemeral per job
-      
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/.github/workflows/main.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-apt-
-      
-      - name: Install mysql client (populates cache for test jobs)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends mysql-client
+      # Note: Tests now use testcontainers - no mysql-client or Docker Buildx caching needed
+      # Testcontainers handles container lifecycle and image pulling automatically
       
       - name: Upload Terraform binary
         uses: actions/upload-artifact@v4
@@ -113,24 +99,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-        - testversion5.6
-        - testversion5.7
-        - testversion8.0
-        - testpercona5.7
-        - testpercona8.0
-        - testmariadb10.3
-        - testmariadb10.8
-        - testmariadb10.10
-        # Track https://github.com/pingcap/tidb/tags
-        # TiDB versions must match env.TIDB_VERSIONS: 6.1.7 6.5.12 7.1.6 7.5.7 8.1.2 8.5.3
-        # Latest version of each minor series
-        - testtidb6.1.7
-        - testtidb6.5.12
-        - testtidb7.1.6
-        - testtidb7.5.7
-        - testtidb8.1.2
-        - testtidb8.5.3
+        include:
+        # MySQL versions
+        - db_type: mysql
+          db_version: "5.6"
+          docker_image: "mysql:5.6"
+        - db_type: mysql
+          db_version: "5.7"
+          docker_image: "mysql:5.7"
+        - db_type: mysql
+          db_version: "8.0"
+          docker_image: "mysql:8.0"
+        # Percona versions
+        - db_type: percona
+          db_version: "5.7"
+          docker_image: "percona:5.7"
+        - db_type: percona
+          db_version: "8.0"
+          docker_image: "percona:8.0"
+        # MariaDB versions
+        - db_type: mariadb
+          db_version: "10.3"
+          docker_image: "mariadb:10.3"
+        - db_type: mariadb
+          db_version: "10.8"
+          docker_image: "mariadb:10.8"
+        - db_type: mariadb
+          db_version: "10.10"
+          docker_image: "mariadb:10.10"
+        # TiDB versions - must match env.TIDB_VERSIONS: 6.1.7 6.5.12 7.1.6 7.5.7 8.1.2 8.5.3
+        - db_type: tidb
+          db_version: "6.1.7"
+        - db_type: tidb
+          db_version: "6.5.12"
+        - db_type: tidb
+          db_version: "7.1.6"
+        - db_type: tidb
+          db_version: "7.5.7"
+        - db_type: tidb
+          db_version: "8.1.2"
+        - db_type: tidb
+          db_version: "8.5.3"
     steps:
       - name: Checkout Git repo
         uses: actions/checkout@v4
@@ -157,136 +166,33 @@ jobs:
       - name: Make Terraform executable
         run: chmod +x bin/terraform
       
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/.github/workflows/main.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-apt-
-      
-      - name: Install mysql client
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends mysql-client
-      
       - name: Set up Docker Buildx
-        if: contains(matrix.target, 'testversion') || contains(matrix.target, 'testpercona') || contains(matrix.target, 'testmariadb')
         uses: docker/setup-buildx-action@v3
       
-      - name: Determine Docker image for this test
-        if: contains(matrix.target, 'testversion') || contains(matrix.target, 'testpercona') || contains(matrix.target, 'testmariadb')
-        id: docker-image
+      - name: Pre-pull Docker images for caching
+        if: matrix.db_type != 'tidb'
         run: |
-          if [[ "${{ matrix.target }}" == testversion5.6 ]]; then
-            echo "image=mysql:5.6" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.target }}" == testversion5.7 ]]; then
-            echo "image=mysql:5.7" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.target }}" == testversion8.0 ]]; then
-            echo "image=mysql:8.0" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.target }}" == testpercona5.7 ]]; then
-            echo "image=percona:5.7" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.target }}" == testpercona8.0 ]]; then
-            echo "image=percona:8.0" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.target }}" == testmariadb10.3 ]]; then
-            echo "image=mariadb:10.3" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.target }}" == testmariadb10.8 ]]; then
-            echo "image=mariadb:10.8" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.target }}" == testmariadb10.10 ]]; then
-            echo "image=mariadb:10.10" >> $GITHUB_OUTPUT
-          fi
+          docker pull ${{ matrix.docker_image }} || true
       
-      - name: Pull and cache Docker image using Buildx
-        if: contains(matrix.target, 'testversion') || contains(matrix.target, 'testpercona') || contains(matrix.target, 'testmariadb')
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile.mysql
-          push: false
-          tags: ${{ steps.docker-image.outputs.image }}
-          build-args: |
-            MYSQL_IMAGE=${{ steps.docker-image.outputs.image }}
-          cache-from: type=gha,scope=${{ steps.docker-image.outputs.image }}
-          cache-to: type=gha,mode=max,scope=${{ steps.docker-image.outputs.image }}
-      
-      - name: Extract TiDB version from test target
-        id: extract-tidb-version
-        if: contains(matrix.target, 'tidb')
+      - name: Pre-pull TiDB images for caching
+        if: matrix.db_type == 'tidb'
         run: |
-          # Extract version from testtidb6.1.7 -> 6.1.7
-          VERSION=$(echo "${{ matrix.target }}" | sed 's/testtidb//')
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "TiDB version for this test: ${VERSION}"
+          docker pull pingcap/tidb:v${{ matrix.db_version }} || true
+          docker pull pingcap/pd:v${{ matrix.db_version }} || true
+          docker pull pingcap/tikv:v${{ matrix.db_version }} || true
       
-      - name: Set up Docker Buildx for TiDB
-        if: contains(matrix.target, 'tidb')
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Pull TiDB Docker images in parallel
-        if: contains(matrix.target, 'tidb')
-        run: |
-          VERSION="${{ steps.extract-tidb-version.outputs.version }}"
-          echo "Pulling TiDB component images for v${VERSION} in parallel..."
-          
-          # Pull all three images in parallel
-          docker pull pingcap/tidb:v${VERSION} &
-          docker pull pingcap/pd:v${VERSION} &
-          docker pull pingcap/tikv:v${VERSION} &
-          
-          # Wait for all pulls to complete
-          wait
-          
-          echo "All TiDB component images pulled successfully"
-      
-      - name: Cache TiDB Docker images using Buildx
-        if: contains(matrix.target, 'tidb')
-        uses: docker/build-push-action@v5
-        continue-on-error: false
-        with:
-          context: .
-          file: Dockerfile.tidb
-          push: false
-          tags: pingcap/tidb:v${{ steps.extract-tidb-version.outputs.version }}
-          build-args: |
-            TIDB_COMPONENT=pingcap/tidb
-            TIDB_VERSION=v${{ steps.extract-tidb-version.outputs.version }}
-          cache-from: type=gha,scope=tidb-v${{ steps.extract-tidb-version.outputs.version }}
-          cache-to: type=gha,mode=max,scope=tidb-v${{ steps.extract-tidb-version.outputs.version }}
-      
-      - name: Pull and cache PD Docker image using Buildx
-        if: contains(matrix.target, 'tidb')
-        uses: docker/build-push-action@v5
-        continue-on-error: false
-        with:
-          context: .
-          file: Dockerfile.tidb
-          push: false
-          tags: pingcap/pd:v${{ steps.extract-tidb-version.outputs.version }}
-          build-args: |
-            TIDB_COMPONENT=pingcap/pd
-            TIDB_VERSION=v${{ steps.extract-tidb-version.outputs.version }}
-          cache-from: type=gha,scope=pd-v${{ steps.extract-tidb-version.outputs.version }}
-          cache-to: type=gha,mode=max,scope=pd-v${{ steps.extract-tidb-version.outputs.version }}
-      
-      - name: Pull and cache TiKV Docker image using Buildx
-        if: contains(matrix.target, 'tidb')
-        uses: docker/build-push-action@v5
-        continue-on-error: false
-        with:
-          context: .
-          file: Dockerfile.tidb
-          push: false
-          tags: pingcap/tikv:v${{ steps.extract-tidb-version.outputs.version }}
-          build-args: |
-            TIDB_COMPONENT=pingcap/tikv
-            TIDB_VERSION=v${{ steps.extract-tidb-version.outputs.version }}
-          cache-from: type=gha,scope=tikv-v${{ steps.extract-tidb-version.outputs.version }}
-          cache-to: type=gha,mode=max,scope=tikv-v${{ steps.extract-tidb-version.outputs.version }}
-      
-      - name: Run tests {{ matrix.target }}
+      - name: Run testcontainers tests
         env:
           GOFLAGS: -mod=vendor
-        run: make ${{ matrix.target }}
+          TF_ACC: 1
+          GOTOOLCHAIN: auto
+        run: |
+          export PATH="${{ github.workspace }}/bin:$PATH"
+          if [ "${{ matrix.db_type }}" == "tidb" ]; then
+            TIDB_VERSION=${{ matrix.db_version }} go test -tags=testcontainers -v ./mysql/... -run WithTestcontainers -timeout=30m
+          else
+            DOCKER_IMAGE=${{ matrix.docker_image }} go test -tags=testcontainers -v ./mysql/... -run WithTestcontainers -timeout=30m
+          fi
   # DISABLED to figure out GPG signing issue on Github Actions
   #         possibly due to lack of TTY inside docker?
   # release:

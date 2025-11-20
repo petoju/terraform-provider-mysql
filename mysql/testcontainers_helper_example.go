@@ -1,3 +1,4 @@
+//go:build spike
 // +build spike
 
 package mysql

@@ -41,6 +41,16 @@ build: fmtcheck
 
 test: acceptance
 
+# Run testcontainers tests with a matrix of MySQL versions
+# Usage: make testcontainers-matrix TESTARGS="TestAccUser"
+testcontainers-matrix: fmtcheck
+	@cd $(CURDIR) && go run scripts/test-runner.go $(if $(TESTARGS),$(TESTARGS),WithTestcontainers)
+
+# Run testcontainers tests for a specific MySQL image
+# Usage: make testcontainers-image DOCKER_IMAGE=mysql:8.0
+testcontainers-image: fmtcheck bin/terraform
+	DOCKER_IMAGE=$(DOCKER_IMAGE) TF_ACC=1 GOTOOLCHAIN=auto go test -tags=testcontainers $(TEST) -v $(TESTARGS) -timeout=15m
+
 bin/terraform:
 	mkdir -p "$(CURDIR)/bin"
 	curl -sfL https://releases.hashicorp.com/terraform/$(TERRAFORM_VERSION)/terraform_$(TERRAFORM_VERSION)_$(TERRAFORM_OS)_$(ARCH).zip > $(CURDIR)/bin/terraform.zip
