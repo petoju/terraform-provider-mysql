@@ -170,6 +170,39 @@ function run_tidb() {
 	fi
 }
 
+function wait_for_tidb() {
+	local _mysql_port=$1
+	local _version=$2
+	echo "==> Waiting for TiDB to be ready..."
+	
+	# Determine timeout based on TiDB version
+	# Versions 6.1.x and 6.5.x need longer startup time
+	if [[ "${_version}" == 6.1.* ]] || [[ "${_version}" == 6.5.* ]]; then
+		TIMEOUT=240  # 4 minutes for older versions
+		echo "Using extended timeout (240s) for TiDB ${_version}"
+	else
+		TIMEOUT=120  # 2 minutes for newer versions
+	fi
+	
+	# Wait for TiDB to be ready
+	for i in $(seq 1 ${TIMEOUT}); do
+		if mysql -h 127.0.0.1 -P ${_mysql_port} -u root -e 'SELECT 1' >/dev/null 2>&1; then
+			echo "TiDB is ready!"
+			return 0
+		fi
+		sleep 1
+		if [ $((i % 10)) -eq 0 ]; then
+			printf "."
+		fi
+	done
+	
+	echo ""
+	echo "ERROR: TiDB failed to start within ${TIMEOUT} seconds"
+	echo "Checking container logs..."
+	docker logs tidb 2>&1 | tail -20 || true
+	return 1
+}
+
 function main() {
 	  parse_params "$@"
 		if [[ "$SCRIPT_INIT" = "true" ]]; then
@@ -178,7 +211,8 @@ function main() {
 			${DOCKER} network create ${DOCKER_NETWORK} && \
 			run_pd && \
 			run_tikv && \
-			run_tidb $MYSQL_PORT
+			run_tidb $MYSQL_PORT && \
+			wait_for_tidb $MYSQL_PORT $MYSQL_VERSION
 
 		else
 			script_usage
