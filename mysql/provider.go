@@ -126,12 +126,6 @@ func Provider() *schema.Provider {
 				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^(socks5h?|http|https)://.*:\d+$`), "The proxy URL is not a valid proxy url. Must be in format: socks5://host:port, http://host:port, or https://host:port"),
 			},
 
-			"use_proxy": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  true,
-			},
-
 			"tls": {
 				Type:        schema.TypeString,
 				Optional:    true,
@@ -764,7 +758,7 @@ func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 	proxyFromEnv := proxy.FromEnvironment()
 	proxyArg := d.Get("proxy").(string)
 
-	if d.Get("use_proxy").(bool) && len(proxyArg) > 0 {
+	if len(proxyArg) > 0 {
 		proxyURL, err := url.Parse(proxyArg)
 		if err != nil {
 			return nil, err
