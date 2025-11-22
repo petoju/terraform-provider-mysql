@@ -126,6 +126,15 @@ func Provider() *schema.Provider {
 				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^(socks5h?|http|https)://.*:\d+$`), "The proxy URL is not a valid proxy url. Must be in format: socks5://host:port, http://host:port, or https://host:port"),
 			},
 
+			"no_proxy": {
+				Type:     schema.TypeString,
+				Optional: true,
+				DefaultFunc: schema.MultiEnvDefaultFunc([]string{
+					"NO_PROXY",
+					"no_proxy",
+				}, nil),
+			},
+
 			"tls": {
 				Type:        schema.TypeString,
 				Optional:    true,
@@ -754,11 +763,95 @@ func (d *httpProxyDialer) Dial(network, addr string) (net.Conn, error) {
 	return conn, nil
 }
 
-func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
-	proxyFromEnv := proxy.FromEnvironment()
-	proxyArg := d.Get("proxy").(string)
+func shouldUseProxy(endpoint, noProxy string) bool {
+	if noProxy == "" {
+		return true
+	}
 
-	if len(proxyArg) > 0 {
+	host := endpoint
+	if strings.Contains(endpoint, ":") {
+		parts := strings.Split(endpoint, ":")
+		host = parts[0]
+	}
+
+	for _, pattern := range strings.Split(noProxy, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+
+		// Handle "*" - matches everything
+		if pattern == "*" {
+			return false
+		}
+
+		// Handle CIDR notation (e.g., 192.168.0.0/16)
+		if strings.Contains(pattern, "/") {
+			_, cidr, err := net.ParseCIDR(pattern)
+			if err == nil {
+				ip := net.ParseIP(host)
+				if ip != nil && cidr.Contains(ip) {
+					return false
+				}
+			}
+			continue
+		}
+
+		// Handle port-specific patterns like "example.com:8080"
+		if strings.Contains(pattern, ":") {
+			if endpoint == pattern {
+				return false
+			}
+			continue
+		}
+
+		// Handle domain patterns
+		if strings.HasPrefix(pattern, ".") {
+			// ".example.com" matches "foo.example.com" and "example.com"
+			domain := pattern[1:]
+			if host == domain || strings.HasSuffix(host, pattern) {
+				return false
+			}
+		} else if strings.HasPrefix(pattern, "*.") {
+			// "*.example.com" matches "foo.example.com" but not "example.com"
+			domain := pattern[2:]
+			if strings.HasSuffix(host, "."+domain) {
+				return false
+			}
+		} else if strings.Contains(pattern, "*") {
+			// Simple wildcard matching
+			matched, _ := regexp.MatchString(strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, ".*"), host)
+			if matched {
+				return false
+			}
+		} else {
+			// Exact match
+			if host == pattern {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
+	proxyArg := ""
+	if v := d.Get("proxy"); v != nil {
+		proxyArg = v.(string)
+	}
+
+	noProxyArg := ""
+	if v := d.Get("no_proxy"); v != nil {
+		noProxyArg = v.(string)
+	}
+
+	endpoint := ""
+	if v := d.Get("endpoint"); v != nil {
+		endpoint = v.(string)
+	}
+
+	// Use explicit proxy if configured and not excluded by no_proxy
+	if len(proxyArg) > 0 && shouldUseProxy(endpoint, noProxyArg) {
 		proxyURL, err := url.Parse(proxyArg)
 		if err != nil {
 			return nil, err
@@ -789,7 +882,8 @@ func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 		return proxyDialer, nil
 	}
 
-	return proxyFromEnv, nil
+	// Fall back to environment-based proxy (automatically respects NO_PROXY)
+	return proxy.FromEnvironment(), nil
 }
 
 func quoteIdentifier(in string) string {

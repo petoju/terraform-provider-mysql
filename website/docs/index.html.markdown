@@ -268,6 +268,7 @@ The following arguments are supported:
 - `username` - Username to use to authenticate with the server, can also be sourced from the `MYSQL_USERNAME` environment variable. This field is optional when `use_rds_data_api` is set to `true` in the `aws_config` block.
 - `password` - (Optional) Password for the given user, if that user has a password, can also be sourced from the `MYSQL_PASSWORD` environment variable.
 - `proxy` - (Optional) Proxy socks url, can also be sourced from `ALL_PROXY` or `all_proxy` environment variables.
+- `no_proxy` - (Optional) Comma-separated list of hosts that should not use the proxy. Supports wildcards (`*.example.com`), domain patterns (`.example.com`), CIDR notation (`192.168.0.0/16`), and exact matches. Can also be sourced from `NO_PROXY` or `no_proxy` environment variables.
 - `tls` - (Optional) The TLS configuration. One of `false`, `true`, or `skip-verify`. Defaults to `false`. Can also be sourced from the `MYSQL_TLS_CONFIG` environment variable.
 - `custom_tls` - (Optional) Sets custom tls options for the connection. Documentation for encrypted connections can be found [here](https://dev.mysql.com/doc/refman/8.0/en/using-encrypted-connections.html). Consider setting shorter `connect_retry_timeout_sec` for debugging, as the default is 5 minutes .This is a block containing an optional `config_key`, which value is discarded but might be useful when troubleshooting, and the following required arguments:
 
