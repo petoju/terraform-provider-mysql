@@ -454,8 +454,8 @@ github.com/hashicorp/terraform-svchost
 # github.com/hashicorp/yamux v0.1.2
 ## explicit; go 1.20
 github.com/hashicorp/yamux
-# github.com/krotscheck/go-rds-driver v0.13.0
-## explicit; go 1.25
+# github.com/krotscheck/go-rds-driver v0.11.1
+## explicit; go 1.22
 github.com/krotscheck/go-rds-driver
 # github.com/kylelemons/godebug v1.1.0
 ## explicit; go 1.11

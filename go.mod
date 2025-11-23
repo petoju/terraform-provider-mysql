@@ -17,7 +17,7 @@ require (
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/hashicorp/go-version v1.7.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.38.1
-	github.com/krotscheck/go-rds-driver v0.13.0
+	github.com/krotscheck/go-rds-driver v0.11.1
 	github.com/tidwall/gjson v1.18.0
 	golang.org/x/net v0.47.0
 	golang.org/x/oauth2 v0.33.0

@@ -3,7 +3,6 @@ package rds
 import (
 	"database/sql/driver"
 	"fmt"
-	"math"
 	"reflect"
 	"time"
 
@@ -22,8 +21,6 @@ type Dialect interface {
 	GetFieldConverter(columnType string) FieldConverter
 	// IsIsolationLevelSupported for this dialect?
 	IsIsolationLevelSupported(level driver.IsolationLevel) bool
-	// GetTransactionSetupQuery returns the query to set up the transaction.
-	GetTransactionSetupQuery(opts driver.TxOptions) string
 }
 
 // ConvertNamedValues converts passed driver.NamedValue instances into RDS SQLParameters
@@ -102,10 +99,6 @@ func ConvertNamedValue(arg driver.NamedValue) (value types.SqlParameter, err err
 			Value: &types.FieldMemberLongValue{Value: t},
 		}
 	case uint:
-		if t > math.MaxInt64 {
-			err = fmt.Errorf("%s value %d overflows int64", name, t)
-			return
-		}
 		value = types.SqlParameter{
 			Name:  &name,
 			Value: &types.FieldMemberLongValue{Value: int64(t)},
@@ -126,10 +119,6 @@ func ConvertNamedValue(arg driver.NamedValue) (value types.SqlParameter, err err
 			Value: &types.FieldMemberLongValue{Value: int64(t)},
 		}
 	case uint64:
-		if t > math.MaxInt64 {
-			err = fmt.Errorf("%s value %d overflows int64", name, t)
-			return
-		}
 		value = types.SqlParameter{
 			Name:  &name,
 			Value: &types.FieldMemberLongValue{Value: int64(t)},
