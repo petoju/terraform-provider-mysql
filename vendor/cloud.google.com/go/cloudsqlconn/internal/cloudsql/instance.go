@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	// the refresh buffer is the amount of time before a refresh operation's
+	// the refresh bufferPool is the amount of time before a refresh operation's
 	// certificate expires that a new refresh operation begins.
 	refreshBuffer = 4 * time.Minute
 
@@ -182,6 +182,8 @@ type ConnectionInfo struct {
 	// It is used to validate the server identity of the CAS instances.
 	DNSName    string
 	Expiration time.Time
+	// Features of the MDX protocol supported by this database
+	MdxProtocolSupport []string
 
 	addrs map[string]string
 }
@@ -195,16 +197,18 @@ func NewConnectionInfo(
 	ipAddrs map[string]string,
 	serverCACert []*x509.Certificate,
 	clientCert tls.Certificate,
+	mdxProtocolSupport []string,
 ) ConnectionInfo {
 	return ConnectionInfo{
-		addrs:             ipAddrs,
-		ClientCertificate: clientCert,
-		ServerCACert:      serverCACert,
-		ServerCAMode:      serverCAMode,
-		Expiration:        clientCert.Leaf.NotAfter,
-		DBVersion:         version,
-		ConnectionName:    cn,
-		DNSName:           dnsName,
+		addrs:              ipAddrs,
+		ClientCertificate:  clientCert,
+		ServerCACert:       serverCACert,
+		ServerCAMode:       serverCAMode,
+		Expiration:         clientCert.Leaf.NotAfter,
+		DBVersion:          version,
+		ConnectionName:     cn,
+		DNSName:            dnsName,
+		MdxProtocolSupport: mdxProtocolSupport,
 	}
 }
 
@@ -235,99 +239,40 @@ func (c ConnectionInfo) Addr(ipType string) (string, error) {
 	return addr, nil
 }
 
-// TLSConfig constructs a TLS configuration for the given connection info.
+// TLSConfig constructs a ClientProtocolTLS configuration for the given connection info.
 func (c ConnectionInfo) TLSConfig() *tls.Config {
 	pool := x509.NewCertPool()
 	for _, caCert := range c.ServerCACert {
 		pool.AddCert(caCert)
 	}
 
-	// If the instance metadata does not contain a domain name, use the legacy
-	// validation checking the CN field for the instance connection name.
-	if c.DNSName == "" {
-		return &tls.Config{
-			ServerName:   c.ConnectionName.String(),
-			Certificates: []tls.Certificate{c.ClientCertificate},
-			RootCAs:      pool,
-			// We need to set InsecureSkipVerify to true due to
-			// https://github.com/GoogleCloudPlatform/cloudsql-proxy/issues/194
-			// https://tip.golang.org/doc/go1.11#crypto/x509
-			//
-			// Since we have a secure channel to the Cloud SQL API which we use to
-			// retrieve the certificates, we instead need to implement our own
-			// VerifyPeerCertificate function that will verify that the certificate
-			// is OK.
-			InsecureSkipVerify:    true,
-			VerifyPeerCertificate: verifyPeerCertificateFunc(c.ConnectionName, pool),
-			MinVersion:            tls.VersionTLS13,
-		}
-	}
-
-	// If the connector was configured with a domain name, use that domain name
-	// to validate the certificate. Otherwise, use the DNS name from the
-	// instance metadata retrieved from the ConnectSettings API endpoint.
-	serverName := c.ConnectionName.DomainName()
-	if serverName == "" {
+	var serverName string
+	if c.ConnectionName.HasDomainName() {
+		// If the connector was configured with a DNS name, use the DNS name from
+		// the configuration to validate the server certificate.
+		serverName = c.ConnectionName.DomainName()
+	} else {
+		// If the connector was configured with an Instance Connection Name,
+		// use the DNS name from the instance metadata.
 		serverName = c.DNSName
 	}
 
-	// By default, use Standard TLS hostname verification name to
-	// verify the server identity.
 	return &tls.Config{
 		ServerName:   serverName,
 		Certificates: []tls.Certificate{c.ClientCertificate},
 		RootCAs:      pool,
 		MinVersion:   tls.VersionTLS13,
-	}
-
-}
-
-// verifyPeerCertificateFunc creates a VerifyPeerCertificate func that
-// verifies that the peer certificate is in the cert pool. We need to define
-// our own because CloudSQL instances use the instance name (e.g.,
-// my-project:my-instance) instead of a valid domain name for the certificate's
-// Common Name.
-func verifyPeerCertificateFunc(
-	cn instance.ConnName, pool *x509.CertPool,
-) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-		if len(rawCerts) == 0 {
-			return errtype.NewDialError(
-				"no certificate to verify", cn.String(), nil,
-			)
-		}
-
-		cert, err := x509.ParseCertificate(rawCerts[0])
-		if err != nil {
-			return errtype.NewDialError(
-				"failed to parse X.509 certificate", cn.String(), err,
-			)
-		}
-
-		opts := x509.VerifyOptions{Roots: pool}
-		if _, err = cert.Verify(opts); err != nil {
-			return errtype.NewDialError(
-				"failed to verify certificate", cn.String(), err,
-			)
-		}
-
-		certInstanceName := fmt.Sprintf("%s:%s", cn.Project(), cn.Name())
-		if cert.Subject.CommonName != certInstanceName {
-			return errtype.NewDialError(
-				fmt.Sprintf(
-					"certificate had CN %q, expected %q",
-					cert.Subject.CommonName, certInstanceName,
-				),
-				cn.String(),
-				nil,
-			)
-		}
-		return nil
+		// Replace entire default TLS verification with our custom TLS
+		// verification defined in verifyPeerCertificateFunc(). This allows the
+		// connector to gracefully and securely handle deviations from standard TLS
+		// hostname validation in some existing Cloud SQL certificates.
+		InsecureSkipVerify:    true,
+		VerifyPeerCertificate: verifyPeerCertificateFunc(serverName, c.ConnectionName, pool),
 	}
 }
 
 // ConnectionInfo returns an IP address specified by ipType (i.e., public or
-// private) and a TLS config that can be used to connect to a Cloud SQL
+// private) and a ClientProtocolTLS config that can be used to connect to a Cloud SQL
 // instance.
 func (i *RefreshAheadCache) ConnectionInfo(ctx context.Context) (ConnectionInfo, error) {
 	op, err := i.refreshOperation(ctx)

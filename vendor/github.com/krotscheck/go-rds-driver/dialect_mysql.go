@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata/types"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,7 +51,6 @@ func (d *DialectMySQL) MigrateQuery(query string, args []driver.NamedValue) (*rd
 				Value: v.Value,
 			}
 		}
-		args = namedArgs
 
 		idx := 0
 		query = ordinalRegex.ReplaceAllStringFunc(query, func(s string) string {
@@ -85,7 +85,11 @@ func (d *DialectMySQL) GetFieldConverter(columnType string) FieldConverter {
 		fallthrough
 	case "BIGINT UNSIGNED":
 		return func(field types.Field) (interface{}, error) {
-			return uint64(field.(*types.FieldMemberLongValue).Value), nil
+			longValue := field.(*types.FieldMemberLongValue).Value
+			if longValue < 0 {
+				return nil, fmt.Errorf("cannot convert negative value %d to uint64", longValue)
+			}
+			return uint64(longValue), nil
 		}
 	case "DECIMAL":
 		return func(field types.Field) (interface{}, error) {
@@ -160,4 +164,21 @@ func (d *DialectMySQL) IsIsolationLevelSupported(level driver.IsolationLevel) bo
 	}
 	_, ok := SupportedIsolationLevels[level]
 	return ok
+}
+
+// GetTransactionSetupQuery returns the query to set up the transaction.
+func (d *DialectMySQL) GetTransactionSetupQuery(opts driver.TxOptions) string {
+	if sql.IsolationLevel(opts.Isolation) == sql.LevelDefault && !opts.ReadOnly {
+		return ""
+	}
+	var clause []string
+	if sql.IsolationLevel(opts.Isolation) != sql.LevelDefault {
+		clause = append(clause, fmt.Sprintf("ISOLATION LEVEL %s", sql.IsolationLevel(opts.Isolation).String()))
+	}
+	if opts.ReadOnly {
+		clause = append(clause, "READ ONLY")
+	} else {
+		clause = append(clause, "READ WRITE")
+	}
+	return fmt.Sprintf("SET TRANSACTION %s", strings.Join(clause, ", "))
 }

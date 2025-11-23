@@ -14,21 +14,12 @@ import (
 	smithyio "github.com/aws/smithy-go/io"
 	"github.com/aws/smithy-go/middleware"
 	"github.com/aws/smithy-go/ptr"
-	smithytime "github.com/aws/smithy-go/time"
+	"github.com/aws/smithy-go/tracing"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"io"
 	"math"
 	"strings"
-	"time"
 )
-
-func deserializeS3Expires(v string) (*time.Time, error) {
-	t, err := smithytime.ParseHTTPDate(v)
-	if err != nil {
-		return nil, nil
-	}
-	return &t, nil
-}
 
 type awsRestjson1_deserializeOpBatchExecuteStatement struct {
 }
@@ -45,6 +36,10 @@ func (m *awsRestjson1_deserializeOpBatchExecuteStatement) HandleDeserialize(ctx 
 		return out, metadata, err
 	}
 
+	_, span := tracing.StartSpan(ctx, "OperationDeserializer")
+	endTimer := startMetricTimer(ctx, "client.call.deserialization_duration")
+	defer endTimer()
+	defer span.End()
 	response, ok := out.RawResponse.(*smithyhttp.Response)
 	if !ok {
 		return out, metadata, &smithy.DeserializationError{Err: fmt.Errorf("unknown transport type %T", out.RawResponse)}
@@ -84,6 +79,7 @@ func (m *awsRestjson1_deserializeOpBatchExecuteStatement) HandleDeserialize(ctx 
 		}
 	}
 
+	span.End()
 	return out, metadata, err
 }
 
@@ -140,6 +136,9 @@ func awsRestjson1_deserializeOpErrorBatchExecuteStatement(response *smithyhttp.R
 	case strings.EqualFold("DatabaseNotFoundException", errorCode):
 		return awsRestjson1_deserializeErrorDatabaseNotFoundException(response, errorBody)
 
+	case strings.EqualFold("DatabaseResumingException", errorCode):
+		return awsRestjson1_deserializeErrorDatabaseResumingException(response, errorBody)
+
 	case strings.EqualFold("DatabaseUnavailableException", errorCode):
 		return awsRestjson1_deserializeErrorDatabaseUnavailableException(response, errorBody)
 
@@ -151,6 +150,9 @@ func awsRestjson1_deserializeOpErrorBatchExecuteStatement(response *smithyhttp.R
 
 	case strings.EqualFold("InternalServerErrorException", errorCode):
 		return awsRestjson1_deserializeErrorInternalServerErrorException(response, errorBody)
+
+	case strings.EqualFold("InvalidResourceStateException", errorCode):
+		return awsRestjson1_deserializeErrorInvalidResourceStateException(response, errorBody)
 
 	case strings.EqualFold("InvalidSecretException", errorCode):
 		return awsRestjson1_deserializeErrorInvalidSecretException(response, errorBody)
@@ -228,6 +230,10 @@ func (m *awsRestjson1_deserializeOpBeginTransaction) HandleDeserialize(ctx conte
 		return out, metadata, err
 	}
 
+	_, span := tracing.StartSpan(ctx, "OperationDeserializer")
+	endTimer := startMetricTimer(ctx, "client.call.deserialization_duration")
+	defer endTimer()
+	defer span.End()
 	response, ok := out.RawResponse.(*smithyhttp.Response)
 	if !ok {
 		return out, metadata, &smithy.DeserializationError{Err: fmt.Errorf("unknown transport type %T", out.RawResponse)}
@@ -267,6 +273,7 @@ func (m *awsRestjson1_deserializeOpBeginTransaction) HandleDeserialize(ctx conte
 		}
 	}
 
+	span.End()
 	return out, metadata, err
 }
 
@@ -323,6 +330,9 @@ func awsRestjson1_deserializeOpErrorBeginTransaction(response *smithyhttp.Respon
 	case strings.EqualFold("DatabaseNotFoundException", errorCode):
 		return awsRestjson1_deserializeErrorDatabaseNotFoundException(response, errorBody)
 
+	case strings.EqualFold("DatabaseResumingException", errorCode):
+		return awsRestjson1_deserializeErrorDatabaseResumingException(response, errorBody)
+
 	case strings.EqualFold("DatabaseUnavailableException", errorCode):
 		return awsRestjson1_deserializeErrorDatabaseUnavailableException(response, errorBody)
 
@@ -334,6 +344,9 @@ func awsRestjson1_deserializeOpErrorBeginTransaction(response *smithyhttp.Respon
 
 	case strings.EqualFold("InternalServerErrorException", errorCode):
 		return awsRestjson1_deserializeErrorInternalServerErrorException(response, errorBody)
+
+	case strings.EqualFold("InvalidResourceStateException", errorCode):
+		return awsRestjson1_deserializeErrorInvalidResourceStateException(response, errorBody)
 
 	case strings.EqualFold("InvalidSecretException", errorCode):
 		return awsRestjson1_deserializeErrorInvalidSecretException(response, errorBody)
@@ -415,6 +428,10 @@ func (m *awsRestjson1_deserializeOpCommitTransaction) HandleDeserialize(ctx cont
 		return out, metadata, err
 	}
 
+	_, span := tracing.StartSpan(ctx, "OperationDeserializer")
+	endTimer := startMetricTimer(ctx, "client.call.deserialization_duration")
+	defer endTimer()
+	defer span.End()
 	response, ok := out.RawResponse.(*smithyhttp.Response)
 	if !ok {
 		return out, metadata, &smithy.DeserializationError{Err: fmt.Errorf("unknown transport type %T", out.RawResponse)}
@@ -454,6 +471,7 @@ func (m *awsRestjson1_deserializeOpCommitTransaction) HandleDeserialize(ctx cont
 		}
 	}
 
+	span.End()
 	return out, metadata, err
 }
 
@@ -521,6 +539,9 @@ func awsRestjson1_deserializeOpErrorCommitTransaction(response *smithyhttp.Respo
 
 	case strings.EqualFold("InternalServerErrorException", errorCode):
 		return awsRestjson1_deserializeErrorInternalServerErrorException(response, errorBody)
+
+	case strings.EqualFold("InvalidResourceStateException", errorCode):
+		return awsRestjson1_deserializeErrorInvalidResourceStateException(response, errorBody)
 
 	case strings.EqualFold("InvalidSecretException", errorCode):
 		return awsRestjson1_deserializeErrorInvalidSecretException(response, errorBody)
@@ -605,6 +626,10 @@ func (m *awsRestjson1_deserializeOpExecuteSql) HandleDeserialize(ctx context.Con
 		return out, metadata, err
 	}
 
+	_, span := tracing.StartSpan(ctx, "OperationDeserializer")
+	endTimer := startMetricTimer(ctx, "client.call.deserialization_duration")
+	defer endTimer()
+	defer span.End()
 	response, ok := out.RawResponse.(*smithyhttp.Response)
 	if !ok {
 		return out, metadata, &smithy.DeserializationError{Err: fmt.Errorf("unknown transport type %T", out.RawResponse)}
@@ -644,6 +669,7 @@ func (m *awsRestjson1_deserializeOpExecuteSql) HandleDeserialize(ctx context.Con
 		}
 	}
 
+	span.End()
 	return out, metadata, err
 }
 
@@ -764,6 +790,10 @@ func (m *awsRestjson1_deserializeOpExecuteStatement) HandleDeserialize(ctx conte
 		return out, metadata, err
 	}
 
+	_, span := tracing.StartSpan(ctx, "OperationDeserializer")
+	endTimer := startMetricTimer(ctx, "client.call.deserialization_duration")
+	defer endTimer()
+	defer span.End()
 	response, ok := out.RawResponse.(*smithyhttp.Response)
 	if !ok {
 		return out, metadata, &smithy.DeserializationError{Err: fmt.Errorf("unknown transport type %T", out.RawResponse)}
@@ -803,6 +833,7 @@ func (m *awsRestjson1_deserializeOpExecuteStatement) HandleDeserialize(ctx conte
 		}
 	}
 
+	span.End()
 	return out, metadata, err
 }
 
@@ -859,6 +890,9 @@ func awsRestjson1_deserializeOpErrorExecuteStatement(response *smithyhttp.Respon
 	case strings.EqualFold("DatabaseNotFoundException", errorCode):
 		return awsRestjson1_deserializeErrorDatabaseNotFoundException(response, errorBody)
 
+	case strings.EqualFold("DatabaseResumingException", errorCode):
+		return awsRestjson1_deserializeErrorDatabaseResumingException(response, errorBody)
+
 	case strings.EqualFold("DatabaseUnavailableException", errorCode):
 		return awsRestjson1_deserializeErrorDatabaseUnavailableException(response, errorBody)
 
@@ -870,6 +904,9 @@ func awsRestjson1_deserializeOpErrorExecuteStatement(response *smithyhttp.Respon
 
 	case strings.EqualFold("InternalServerErrorException", errorCode):
 		return awsRestjson1_deserializeErrorInternalServerErrorException(response, errorBody)
+
+	case strings.EqualFold("InvalidResourceStateException", errorCode):
+		return awsRestjson1_deserializeErrorInvalidResourceStateException(response, errorBody)
 
 	case strings.EqualFold("InvalidSecretException", errorCode):
 		return awsRestjson1_deserializeErrorInvalidSecretException(response, errorBody)
@@ -982,6 +1019,10 @@ func (m *awsRestjson1_deserializeOpRollbackTransaction) HandleDeserialize(ctx co
 		return out, metadata, err
 	}
 
+	_, span := tracing.StartSpan(ctx, "OperationDeserializer")
+	endTimer := startMetricTimer(ctx, "client.call.deserialization_duration")
+	defer endTimer()
+	defer span.End()
 	response, ok := out.RawResponse.(*smithyhttp.Response)
 	if !ok {
 		return out, metadata, &smithy.DeserializationError{Err: fmt.Errorf("unknown transport type %T", out.RawResponse)}
@@ -1021,6 +1062,7 @@ func (m *awsRestjson1_deserializeOpRollbackTransaction) HandleDeserialize(ctx co
 		}
 	}
 
+	span.End()
 	return out, metadata, err
 }
 
@@ -1088,6 +1130,9 @@ func awsRestjson1_deserializeOpErrorRollbackTransaction(response *smithyhttp.Res
 
 	case strings.EqualFold("InternalServerErrorException", errorCode):
 		return awsRestjson1_deserializeErrorInternalServerErrorException(response, errorBody)
+
+	case strings.EqualFold("InvalidResourceStateException", errorCode):
+		return awsRestjson1_deserializeErrorInvalidResourceStateException(response, errorBody)
 
 	case strings.EqualFold("InvalidSecretException", errorCode):
 		return awsRestjson1_deserializeErrorInvalidSecretException(response, errorBody)
@@ -1301,6 +1346,42 @@ func awsRestjson1_deserializeErrorDatabaseNotFoundException(response *smithyhttp
 	return output
 }
 
+func awsRestjson1_deserializeErrorDatabaseResumingException(response *smithyhttp.Response, errorBody *bytes.Reader) error {
+	output := &types.DatabaseResumingException{}
+	var buff [1024]byte
+	ringBuffer := smithyio.NewRingBuffer(buff[:])
+
+	body := io.TeeReader(errorBody, ringBuffer)
+	decoder := json.NewDecoder(body)
+	decoder.UseNumber()
+	var shape interface{}
+	if err := decoder.Decode(&shape); err != nil && err != io.EOF {
+		var snapshot bytes.Buffer
+		io.Copy(&snapshot, ringBuffer)
+		err = &smithy.DeserializationError{
+			Err:      fmt.Errorf("failed to decode response body, %w", err),
+			Snapshot: snapshot.Bytes(),
+		}
+		return err
+	}
+
+	err := awsRestjson1_deserializeDocumentDatabaseResumingException(&output, shape)
+
+	if err != nil {
+		var snapshot bytes.Buffer
+		io.Copy(&snapshot, ringBuffer)
+		err = &smithy.DeserializationError{
+			Err:      fmt.Errorf("failed to decode response body, %w", err),
+			Snapshot: snapshot.Bytes(),
+		}
+		return err
+	}
+
+	errorBody.Seek(0, io.SeekStart)
+
+	return output
+}
+
 func awsRestjson1_deserializeErrorDatabaseUnavailableException(response *smithyhttp.Response, errorBody *bytes.Reader) error {
 	output := &types.DatabaseUnavailableException{}
 	return output
@@ -1380,6 +1461,42 @@ func awsRestjson1_deserializeErrorHttpEndpointNotEnabledException(response *smit
 
 func awsRestjson1_deserializeErrorInternalServerErrorException(response *smithyhttp.Response, errorBody *bytes.Reader) error {
 	output := &types.InternalServerErrorException{}
+	return output
+}
+
+func awsRestjson1_deserializeErrorInvalidResourceStateException(response *smithyhttp.Response, errorBody *bytes.Reader) error {
+	output := &types.InvalidResourceStateException{}
+	var buff [1024]byte
+	ringBuffer := smithyio.NewRingBuffer(buff[:])
+
+	body := io.TeeReader(errorBody, ringBuffer)
+	decoder := json.NewDecoder(body)
+	decoder.UseNumber()
+	var shape interface{}
+	if err := decoder.Decode(&shape); err != nil && err != io.EOF {
+		var snapshot bytes.Buffer
+		io.Copy(&snapshot, ringBuffer)
+		err = &smithy.DeserializationError{
+			Err:      fmt.Errorf("failed to decode response body, %w", err),
+			Snapshot: snapshot.Bytes(),
+		}
+		return err
+	}
+
+	err := awsRestjson1_deserializeDocumentInvalidResourceStateException(&output, shape)
+
+	if err != nil {
+		var snapshot bytes.Buffer
+		io.Copy(&snapshot, ringBuffer)
+		err = &smithy.DeserializationError{
+			Err:      fmt.Errorf("failed to decode response body, %w", err),
+			Snapshot: snapshot.Bytes(),
+		}
+		return err
+	}
+
+	errorBody.Seek(0, io.SeekStart)
+
 	return output
 }
 
@@ -1626,7 +1743,7 @@ func awsRestjson1_deserializeDocumentAccessDeniedException(v **types.AccessDenie
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -1800,7 +1917,7 @@ func awsRestjson1_deserializeDocumentBadRequestException(v **types.BadRequestExc
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -2053,7 +2170,7 @@ func awsRestjson1_deserializeDocumentDatabaseErrorException(v **types.DatabaseEr
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -2093,7 +2210,47 @@ func awsRestjson1_deserializeDocumentDatabaseNotFoundException(v **types.Databas
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
+			if value != nil {
+				jtv, ok := value.(string)
+				if !ok {
+					return fmt.Errorf("expected ErrorMessage to be of type string, got %T instead", value)
+				}
+				sv.Message = ptr.String(jtv)
+			}
+
+		default:
+			_, _ = key, value
+
+		}
+	}
+	*v = sv
+	return nil
+}
+
+func awsRestjson1_deserializeDocumentDatabaseResumingException(v **types.DatabaseResumingException, value interface{}) error {
+	if v == nil {
+		return fmt.Errorf("unexpected nil of type %T", v)
+	}
+	if value == nil {
+		return nil
+	}
+
+	shape, ok := value.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("unexpected JSON type %v", value)
+	}
+
+	var sv *types.DatabaseResumingException
+	if *v == nil {
+		sv = &types.DatabaseResumingException{}
+	} else {
+		sv = *v
+	}
+
+	for key, value := range shape {
+		switch key {
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -2400,7 +2557,7 @@ func awsRestjson1_deserializeDocumentForbiddenException(v **types.ForbiddenExcep
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -2440,7 +2597,7 @@ func awsRestjson1_deserializeDocumentHttpEndpointNotEnabledException(v **types.H
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -2489,6 +2646,46 @@ func awsRestjson1_deserializeDocumentInternalServerErrorException(v **types.Inte
 	return nil
 }
 
+func awsRestjson1_deserializeDocumentInvalidResourceStateException(v **types.InvalidResourceStateException, value interface{}) error {
+	if v == nil {
+		return fmt.Errorf("unexpected nil of type %T", v)
+	}
+	if value == nil {
+		return nil
+	}
+
+	shape, ok := value.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("unexpected JSON type %v", value)
+	}
+
+	var sv *types.InvalidResourceStateException
+	if *v == nil {
+		sv = &types.InvalidResourceStateException{}
+	} else {
+		sv = *v
+	}
+
+	for key, value := range shape {
+		switch key {
+		case "message", "Message":
+			if value != nil {
+				jtv, ok := value.(string)
+				if !ok {
+					return fmt.Errorf("expected ErrorMessage to be of type string, got %T instead", value)
+				}
+				sv.Message = ptr.String(jtv)
+			}
+
+		default:
+			_, _ = key, value
+
+		}
+	}
+	*v = sv
+	return nil
+}
+
 func awsRestjson1_deserializeDocumentInvalidSecretException(v **types.InvalidSecretException, value interface{}) error {
 	if v == nil {
 		return fmt.Errorf("unexpected nil of type %T", v)
@@ -2511,7 +2708,7 @@ func awsRestjson1_deserializeDocumentInvalidSecretException(v **types.InvalidSec
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -2625,7 +2822,7 @@ func awsRestjson1_deserializeDocumentNotFoundException(v **types.NotFoundExcepti
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -2857,7 +3054,7 @@ func awsRestjson1_deserializeDocumentSecretsErrorException(v **types.SecretsErro
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -3056,7 +3253,7 @@ func awsRestjson1_deserializeDocumentStatementTimeoutException(v **types.Stateme
 				sv.DbConnectionId = i64
 			}
 
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -3168,7 +3365,7 @@ func awsRestjson1_deserializeDocumentTransactionNotFoundException(v **types.Tran
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {
@@ -3208,7 +3405,7 @@ func awsRestjson1_deserializeDocumentUnsupportedResultException(v **types.Unsupp
 
 	for key, value := range shape {
 		switch key {
-		case "message":
+		case "message", "Message":
 			if value != nil {
 				jtv, ok := value.(string)
 				if !ok {

@@ -13,9 +13,9 @@ import (
 
 // Runs one or more SQL statements.
 //
-// This operation isn't supported for Aurora PostgreSQL Serverless v2 and
-// provisioned DB clusters, and for Aurora Serverless v1 DB clusters, the operation
-// is deprecated. Use the BatchExecuteStatement or ExecuteStatement operation.
+// This operation isn't supported for Aurora Serverless v2 and provisioned DB
+// clusters. For Aurora Serverless v1 DB clusters, the operation is deprecated. Use
+// the BatchExecuteStatement or ExecuteStatement operation.
 //
 // Deprecated: The ExecuteSql API is deprecated, please use the ExecuteStatement
 // API.
@@ -128,6 +128,9 @@ func (c *Client) addOperationExecuteSqlMiddlewares(stack *middleware.Stack, opti
 	if err = addRecordResponseTiming(stack); err != nil {
 		return err
 	}
+	if err = addSpanRetryLoop(stack, options); err != nil {
+		return err
+	}
 	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
@@ -138,6 +141,15 @@ func (c *Client) addOperationExecuteSqlMiddlewares(stack *middleware.Stack, opti
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
+	if err = addTimeOffsetBuild(stack, c); err != nil {
+		return err
+	}
+	if err = addUserAgentRetryMode(stack, options); err != nil {
+		return err
+	}
+	if err = addCredentialSource(stack, options); err != nil {
 		return err
 	}
 	if err = addOpExecuteSqlValidationMiddleware(stack); err != nil {
@@ -159,6 +171,15 @@ func (c *Client) addOperationExecuteSqlMiddlewares(stack *middleware.Stack, opti
 		return err
 	}
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
+	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
+		return err
+	}
+	if err = addInterceptAttempt(stack, options); err != nil {
+		return err
+	}
+	if err = addInterceptors(stack, options); err != nil {
 		return err
 	}
 	return nil
