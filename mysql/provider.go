@@ -276,6 +276,7 @@ func Provider() *schema.Provider {
 		DataSourcesMap: map[string]*schema.Resource{
 			"mysql_databases": dataSourceDatabases(),
 			"mysql_tables":    dataSourceTables(),
+			"mysql_users":     dataSourceUsers(),
 		},
 
 		ResourcesMap: map[string]*schema.Resource{

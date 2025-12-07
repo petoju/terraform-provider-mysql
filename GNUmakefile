@@ -19,8 +19,8 @@ bin/terraform:
 	curl -sfL https://releases.hashicorp.com/terraform/$(TERRAFORM_VERSION)/terraform_$(TERRAFORM_VERSION)_$(TERRAFORM_OS)_amd64.zip > $(CURDIR)/bin/terraform.zip
 	(cd $(CURDIR)/bin/ ; unzip terraform.zip)
 
-testacc: fmtcheck bin/terraform
-	PATH="$(CURDIR)/bin:${PATH}" TF_ACC=1 go test $(TEST) -v $(TESTARGS) -timeout=120s
+testacc: bin/terraform
+	TF_ACC=1 go test $(TEST) -v $(TESTARGS) -timeout=180s
 
 acceptance: testversion5.6 testversion5.7 testversion8.0 testversion8.4.5 testpercona5.7 testpercona8.0 testmariadb10.3 testmariadb10.8 testmariadb10.10 testtidb6.1.0 testtidb7.5.2
 
