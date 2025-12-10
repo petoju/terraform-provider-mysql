@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -67,9 +68,24 @@ func resourceUser() *schema.Resource {
 			"password": {
 				Type:          schema.TypeString,
 				Optional:      true,
-				ConflictsWith: []string{"plaintext_password"},
+				ConflictsWith: []string{"plaintext_password", "password_wo"},
 				Sensitive:     true,
 				Deprecated:    "Please use plaintext_password instead",
+			},
+
+			"password_wo": {
+				Type:          schema.TypeString,
+				Optional:      true,
+				ConflictsWith: []string{"plaintext_password", "password"},
+				RequiredWith:  []string{"password_wo_version"},
+				Sensitive:     true,
+				WriteOnly:     true,
+			},
+
+			"password_wo_version": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				RequiredWith: []string{"password_wo"},
 			},
 
 			"auth_plugin": {
@@ -112,7 +128,7 @@ func resourceUser() *schema.Resource {
 				Optional:         true,
 				Sensitive:        true,
 				DiffSuppressFunc: NewEmptyStringSuppressFunc,
-				ConflictsWith:    []string{"plaintext_password", "password"},
+				ConflictsWith:    []string{"plaintext_password", "password", "password_wo"},
 			},
 			"auth_string_hex": {
 				Type:             schema.TypeString,
@@ -120,7 +136,7 @@ func resourceUser() *schema.Resource {
 				Sensitive:        true,
 				StateFunc:        NormalizeHexStringStateFunc,
 				DiffSuppressFunc: SuppressHexStringDiff,
-				ConflictsWith:    []string{"plaintext_password", "password", "auth_string_hashed"},
+				ConflictsWith:    []string{"plaintext_password", "password", "password_wo", "auth_string_hashed"},
 			},
 			"tls_option": {
 				Type:     schema.TypeString,
@@ -240,6 +256,12 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		password = v.(string)
 	} else {
 		password = d.Get("password").(string)
+	}
+
+	if wo, diags := getWriteOnlyString(d, "password_wo"); diags.HasError() {
+		return diags
+	} else if wo != "" {
+		password = wo
 	}
 
 	if auth == "AWSAuthenticationPlugin" && host == "localhost" {
@@ -383,6 +405,14 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		_, newpw = d.GetChange("password")
 	} else {
 		newpw = nil
+	}
+
+	if d.HasChange("password_wo_version") {
+		if wo, diags := getWriteOnlyString(d, "password_wo"); diags.HasError() {
+			return diags
+		} else if wo != "" {
+			newpw = wo
+		}
 	}
 
 	retainPassword := d.Get("retain_old_password").(bool)
@@ -585,6 +615,28 @@ func ImportUser(ctx context.Context, d *schema.ResourceData, meta interface{}) (
 	}
 
 	return []*schema.ResourceData{d}, ferror
+}
+
+func getWriteOnlyString(d *schema.ResourceData, pathName string) (string, diag.Diagnostics) {
+	path := cty.GetAttrPath(pathName)
+	if d.GetRawConfig().IsNull() {
+		return "", diag.Diagnostics{}
+	}
+	val, di := d.GetRawConfigAt(path)
+	if di.HasError() {
+		return "", di
+	}
+	if !val.Type().Equals(cty.String) {
+		return "", diag.Errorf("invalid type for %s, expected string", pathName)
+	}
+	if val.IsNull() || !val.IsKnown() {
+		return "", diag.Diagnostics{}
+	}
+	value := val.AsString()
+	if value == "" {
+		return "", diag.Errorf("%s must not be empty", pathName)
+	}
+	return value, nil
 }
 
 func NewEmptyStringSuppressFunc(k, old, new string, d *schema.ResourceData) bool {

@@ -417,6 +417,36 @@ func TestAccUser_deprecated(t *testing.T) {
 	})
 }
 
+func TestAccUser_passwordWO(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipMariaDB(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserConfig_password_wo,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "wo"),
+					resource.TestCheckResourceAttr("mysql_user.test", "host", "%"),
+					resource.TestCheckResourceAttr("mysql_user.test", "password_wo_version", "1"),
+					testAccUserAuthValid("wo", "secret1"),
+				),
+			},
+			{
+				Config: testAccUserConfig_password_wo_update,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "wo"),
+					resource.TestCheckResourceAttr("mysql_user.test", "host", "%"),
+					resource.TestCheckResourceAttr("mysql_user.test", "password_wo_version", "2"),
+					testAccUserAuthValid("wo", "secret2"),
+				),
+			},
+		},
+	})
+}
+
 func testAccUserExists(rn string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]
@@ -834,5 +864,23 @@ resource "mysql_user" "test" {
     plaintext_password   = "password2"
     retain_old_password  = true
     discard_old_password = true
+}
+`
+
+const testAccUserConfig_password_wo = `
+resource "mysql_user" "test" {
+    user = "wo"
+    host = "%"
+    password_wo = "secret1"
+    password_wo_version = 1
+}
+`
+
+const testAccUserConfig_password_wo_update = `
+resource "mysql_user" "test" {
+    user = "wo"
+    host = "%"
+    password_wo = "secret2"
+    password_wo_version = 2
 }
 `
