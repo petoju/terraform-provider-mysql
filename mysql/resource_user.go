@@ -410,7 +410,7 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	if d.HasChange("password_wo_version") {
 		if wo, diags := getWriteOnlyString(d, "password_wo"); diags.HasError() {
 			return diags
-		} else if wo != "" {
+		} else {
 			newpw = wo
 		}
 	}
