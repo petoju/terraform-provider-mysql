@@ -350,6 +350,59 @@ func TestAccGrantComplex(t *testing.T) {
 	})
 }
 
+func TestAccGrant_partialRevokeWithGrantOption(t *testing.T) {
+	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
+	tableName := "tbl"
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheckSkipTiDB(t); testAccPreCheckSkipRds(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccGrantCheckDestroy,
+		Steps: []resource.TestStep{
+			// Create table first
+			{
+				Config: testAccGrantConfigNoGrant(dbName),
+				Check: resource.ComposeTestCheckFunc(
+					prepareTable(dbName, tableName),
+				),
+			},
+			// Grant SELECT, UPDATE, INSERT and GRANT OPTION privileges
+			{
+				Config: testAccGrantConfigWithPrivs(dbName, `"SELECT","UPDATE","INSERT"`, true),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "SELECT", true, true),
+					testAccPrivilege("mysql_grant.test", "UPDATE", true, true),
+					testAccPrivilege("mysql_grant.test", "INSERT", true, true),
+					resource.TestCheckResourceAttr("mysql_grant.test", "grant", "true"),
+				),
+			},
+			// Revoke just the INSERT privilege, it must keep SELECT, UPDATE and GRANT OPTION
+			{
+				Config: testAccGrantConfigWithPrivs(dbName, `"SELECT","UPDATE"`, true),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "SELECT", true, true),
+					testAccPrivilege("mysql_grant.test", "UPDATE", true, true),
+					testAccPrivilege("mysql_grant.test", "INSERT", false, true),
+					resource.TestCheckResourceAttr("mysql_grant.test", "grant", "true"),
+				),
+			},
+			// Revoke UPDATE and GRANT OPTION, it must keep SELECT without GRANT OPTION
+			{
+				Config: testAccGrantConfigWithPrivs(dbName, `"SELECT"`, false),
+				Check: resource.ComposeTestCheckFunc(
+					testAccPrivilege("mysql_grant.test", "SELECT", true, false),
+					testAccPrivilege("mysql_grant.test", "UPDATE", false, false),
+					testAccPrivilege("mysql_grant.test", "INSERT", false, false),
+					resource.TestCheckResourceAttr("mysql_grant.test", "grant", "false"),
+				),
+			},
+			// Finally, revoke all privileges
+			{
+				Config: testAccGrantConfigNoGrant(dbName),
+			},
+		},
+	})
+}
+
 func TestAccGrantComplexMySQL8(t *testing.T) {
 	dbName := fmt.Sprintf("tf-test-%d", rand.Intn(100))
 	resource.Test(t, resource.TestCase{

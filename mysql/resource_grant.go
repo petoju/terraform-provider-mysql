@@ -54,7 +54,7 @@ type MySQLGrantWithRoles interface {
 }
 
 type PrivilegesPartiallyRevocable interface {
-	SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string
+	SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string, revokeGrantOption bool) string
 }
 
 type UserOrRole struct {
@@ -173,8 +173,8 @@ func (t *TablePrivilegeGrant) SQLRevokeStatement() string {
 	return fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privs, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
 }
 
-func (t *TablePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
-	if t.Grant && !containsAllPrivilege(privilegesToRevoke) {
+func (t *TablePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string, revokeGrantOption bool) string {
+	if revokeGrantOption && !containsAllPrivilege(privilegesToRevoke) {
 		privilegesToRevoke = append(privilegesToRevoke, "GRANT OPTION")
 	}
 	return fmt.Sprintf("REVOKE %s ON %s.%s FROM %s", strings.Join(privilegesToRevoke, ", "), t.GetDatabase(), t.GetTable(), t.UserOrRole.SQLString())
@@ -241,9 +241,9 @@ func (t *ProcedurePrivilegeGrant) SQLRevokeStatement() string {
 	return stmt
 }
 
-func (t *ProcedurePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string) string {
+func (t *ProcedurePrivilegeGrant) SQLPartialRevokePrivilegesStatement(privilegesToRevoke []string, revokeGrantOption bool) string {
 	privs := privilegesToRevoke
-	if t.Grant && !containsAllPrivilege(privilegesToRevoke) {
+	if revokeGrantOption && !containsAllPrivilege(privilegesToRevoke) {
 		privs = append(privs, "GRANT OPTION")
 	}
 	return fmt.Sprintf("REVOKE %s ON %s %s.%s FROM %s", strings.Join(privs, ", "), t.ObjectT, t.GetDatabase(), t.GetCallableName(), t.UserOrRole.SQLString())
@@ -588,6 +588,13 @@ func updatePrivileges(ctx context.Context, db *sql.DB, d *schema.ResourceData, g
 	newPrivs := newPrivsIf.(*schema.Set)
 	grantIfs := newPrivs.Difference(oldPrivs).List()
 	revokeIfs := oldPrivs.Difference(newPrivs).List()
+	oldGrantOptionIf, newGrantOptionIf := d.GetChange("grant")
+	oldGrantOption := oldGrantOptionIf.(bool)
+	newGrantOption := newGrantOptionIf.(bool)
+	revokeGrantOption := false
+	if oldGrantOption && !newGrantOption {
+		revokeGrantOption = true
+	}
 
 	// Normalize the privileges to revoke
 	privsToRevoke := []string{}
@@ -602,7 +609,7 @@ func updatePrivileges(ctx context.Context, db *sql.DB, d *schema.ResourceData, g
 		if !ok {
 			return fmt.Errorf("grant does not support partial privilege revokes")
 		}
-		sqlCommand := partialRevoker.SQLPartialRevokePrivilegesStatement(privsToRevoke)
+		sqlCommand := partialRevoker.SQLPartialRevokePrivilegesStatement(privsToRevoke, revokeGrantOption)
 		log.Printf("[DEBUG] SQL for partial revoke: %s", sqlCommand)
 
 		if _, err := db.ExecContext(ctx, sqlCommand); err != nil {
