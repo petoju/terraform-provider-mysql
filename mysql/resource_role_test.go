@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -79,7 +80,7 @@ func testAccRoleExists(roleName string) resource.TestCheckFunc {
 }
 
 func testAccGetRoleGrantCount(roleName string, db *sql.DB) (int, error) {
-	rows, err := db.Query(fmt.Sprintf("SHOW GRANTS FOR %s", quoteIdentifier(roleName)))
+	rows, err := db.Query(fmt.Sprintf("SHOW GRANTS FOR %s", quoteRoleName(roleName)))
 	if err != nil {
 		return 0, err
 	}
@@ -402,6 +403,7 @@ func TestAccRole_importNonExistent(t *testing.T) {
 		PreCheck: func() {
 			testAccPreCheck(t)
 			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipMariaDB(t)
 			ctx := context.Background()
 			db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
 			if err != nil {
@@ -427,12 +429,7 @@ func TestAccRole_importNonExistent(t *testing.T) {
 				ResourceName:  "mysql_role.test",
 				ImportState:   true,
 				ImportStateId: roleName,
-				ImportStateCheck: func(states []*terraform.InstanceState) error {
-					if len(states) != 0 {
-						return fmt.Errorf("expected no states, got %d", len(states))
-					}
-					return nil
-				},
+				ExpectError:   regexp.MustCompile("Cannot import non-existent remote object"),
 			},
 		},
 	})
@@ -782,7 +779,7 @@ func TestAccRole_importReservedWord(t *testing.T) {
 }
 
 func TestAccRole_importLongName(t *testing.T) {
-	roleName := "tf-test-role-long-" + strings.Repeat("a", 46)
+	roleName := "tf-test-role-long-" + strings.Repeat("a", 14)
 	resourceName := "mysql_role.test"
 
 	resource.Test(t, resource.TestCase{

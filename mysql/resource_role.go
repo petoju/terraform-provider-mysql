@@ -36,7 +36,7 @@ func CreateRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 	roleName := d.Get("name").(string)
 
-	sql := fmt.Sprintf("CREATE ROLE %s", quoteString(roleName))
+	sql := fmt.Sprintf("CREATE ROLE %s", quoteRoleName(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
@@ -55,7 +55,7 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteString(d.Id()))
+	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteRoleName(d.Id()))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	rows, err := db.QueryContext(ctx, sql)
@@ -87,7 +87,7 @@ func DeleteRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("DROP ROLE %s", quoteString(d.Get("name").(string)))
+	sql := fmt.Sprintf("DROP ROLE %s", quoteRoleName(d.Get("name").(string)))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)

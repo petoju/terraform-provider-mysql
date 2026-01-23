@@ -890,6 +890,11 @@ func quoteIdentifier(in string) string {
 	return fmt.Sprintf("`%s`", identQuoteReplacer.Replace(in))
 }
 
+// quoteRoleName safely quotes role names with backticks and proper escaping
+func quoteRoleName(s string) string {
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(s, "`", "``"))
+}
+
 func serverVersion(db *sql.DB) (*version.Version, error) {
 	var versionString string
 	err := db.QueryRow("SELECT @@GLOBAL.version").Scan(&versionString)
