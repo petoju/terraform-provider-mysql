@@ -36,7 +36,7 @@ func CreateRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 	roleName := d.Get("name").(string)
 
-	sql := fmt.Sprintf("CREATE ROLE %s", quoteIdentifier(roleName))
+	sql := fmt.Sprintf("CREATE ROLE %s", quoteString(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
@@ -55,13 +55,13 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteIdentifier(d.Id()))
+	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteString(d.Id()))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	rows, err := db.QueryContext(ctx, sql)
 	if err != nil {
 		errorNumber := mysqlErrorNumber(err)
-		if errorNumber == 1133 || errorNumber == 1396 {
+		if errorNumber == 1133 || errorNumber == 1396 || errorNumber == 1141 {
 			log.Printf("[WARN] Role %s does not exist, removing from state", d.Id())
 			d.SetId("")
 			return nil
@@ -69,6 +69,12 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 	defer rows.Close()
+
+	if !rows.Next() {
+		log.Printf("[WARN] Role %s does not exist (no grants returned), removing from state", d.Id())
+		d.SetId("")
+		return nil
+	}
 
 	d.Set("name", d.Id())
 
@@ -81,7 +87,7 @@ func DeleteRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("DROP ROLE %s", quoteIdentifier(d.Get("name").(string)))
+	sql := fmt.Sprintf("DROP ROLE %s", quoteString(d.Get("name").(string)))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)

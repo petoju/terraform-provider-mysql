@@ -421,6 +421,9 @@ func TestAccRole_importNonExistent(t *testing.T) {
 		ProviderFactories: testAccProviderFactories,
 		Steps: []resource.TestStep{
 			{
+				Config: " ",
+			},
+			{
 				ResourceName:  "mysql_role.test",
 				ImportState:   true,
 				ImportStateId: roleName,
@@ -443,6 +446,7 @@ func TestAccRole_importWithGrants(t *testing.T) {
 		PreCheck: func() {
 			testAccPreCheck(t)
 			testAccPreCheckSkipRds(t)
+			testAccPreCheckSkipMariaDB(t)
 			ctx := context.Background()
 			db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
 			if err != nil {
@@ -618,7 +622,7 @@ func TestAccRole_importSingleQuote(t *testing.T) {
 }
 
 func TestAccRole_importBackslash(t *testing.T) {
-	roleName := "tf-test-role\\backslash"
+	roleName := "tf-test-role\\\\backslash"
 	resourceName := "mysql_role.test"
 
 	resource.Test(t, resource.TestCase{
@@ -658,7 +662,7 @@ func TestAccRole_importBackslash(t *testing.T) {
 }
 
 func TestAccRole_importDoubleQuote(t *testing.T) {
-	roleName := "tf-test-role\\\"quote"
+	roleName := "tf-test-role\\\"quote-test"
 	resourceName := "mysql_role.test"
 
 	resource.Test(t, resource.TestCase{
