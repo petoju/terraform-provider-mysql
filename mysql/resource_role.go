@@ -60,6 +60,12 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 
 	rows, err := db.QueryContext(ctx, sql)
 	if err != nil {
+		errorNumber := mysqlErrorNumber(err)
+		if errorNumber == 1133 || errorNumber == 1396 {
+			log.Printf("[WARN] Role %s does not exist, removing from state", d.Id())
+			d.SetId("")
+			return nil
+		}
 		return diag.FromErr(err)
 	}
 	defer rows.Close()

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -425,7 +424,6 @@ func TestAccRole_importNonExistent(t *testing.T) {
 				ResourceName:  "mysql_role.test",
 				ImportState:   true,
 				ImportStateId: roleName,
-				ExpectError:   regexp.MustCompile(".*"),
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 0 {
 						return fmt.Errorf("expected no states, got %d", len(states))
