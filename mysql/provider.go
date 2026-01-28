@@ -890,9 +890,12 @@ func quoteIdentifier(in string) string {
 	return fmt.Sprintf("`%s`", identQuoteReplacer.Replace(in))
 }
 
-// quoteRoleName safely quotes role names with backticks and proper escaping
+// quoteRoleName safely quotes role names with single quotes and proper escaping
 func quoteRoleName(s string) string {
-	return fmt.Sprintf("`%s`", strings.ReplaceAll(s, "`", "``"))
+	// Escape backslashes first, then single quotes
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "''")
+	return fmt.Sprintf("'%s'", s)
 }
 
 func serverVersion(db *sql.DB) (*version.Version, error) {

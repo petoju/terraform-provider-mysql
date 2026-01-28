@@ -840,7 +840,10 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) 
 }
 
 var (
-	kUserOrRoleRegex = regexp.MustCompile("['`]?([^'`]+)['`]?(?:@['`]?([^'`]+)['`]?)?")
+	// kUserOrRoleRegex matches user/role names with proper handling of backslash escape sequences
+	// Pattern handles: unquoted names, single-quoted names, double-quoted names, and backtick-quoted names
+	// For quoted names, it properly captures backslash-escaped characters (e.g., \' or \\)
+	kUserOrRoleRegex = regexp.MustCompile("['`]?((?:[^'`\"\\\\]|\\\\.)*)['`]?(?:@['\"]?((?:[^'`\"\\\\]|\\\\.)*)['\"]?)?")
 )
 
 func parseUserOrRoleFromRow(userOrRoleStr string) (*UserOrRole, error) {
@@ -961,7 +964,8 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 		roles := make([]string, len(rolesStart))
 
 		for i, role := range rolesStart {
-			roles[i] = strings.Trim(role, "`@%\" ")
+			role = strings.Trim(role, "`'@%\" ")
+			roles[i] = unescapeRoleName(role)
 		}
 
 		userOrRole, err := parseUserOrRoleFromRow(roleMatches[2])
@@ -981,6 +985,15 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 	} else {
 		return nil, fmt.Errorf("failed to parse object portion of grant statement: %s", grantStr)
 	}
+}
+
+// unescapeRoleName reverses the escaping done by quoteRoleName in provider.go.
+// It unescapes backslashes (\\ -> \) and removes doubled single quotes ('' -> ').
+func unescapeRoleName(s string) string {
+	// Unescape doubled single quotes first, then backslashes
+	s = strings.ReplaceAll(s, "''", "'")
+	s = strings.ReplaceAll(s, "\\\\", "\\")
+	return s
 }
 
 func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {

@@ -423,9 +423,6 @@ func TestAccRole_importNonExistent(t *testing.T) {
 		ProviderFactories: testAccProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: " ",
-			},
-			{
 				ResourceName:  "mysql_role.test",
 				ImportState:   true,
 				ImportStateId: roleName,
@@ -434,7 +431,6 @@ func TestAccRole_importNonExistent(t *testing.T) {
 		},
 	})
 }
-
 func TestAccRole_importWithGrants(t *testing.T) {
 	roleName := "tf-test-role-with-grants"
 	resourceName := "mysql_role.test"
