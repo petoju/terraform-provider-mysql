@@ -988,7 +988,7 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 }
 
 // unescapeRoleName reverses the escaping done by quoteRoleName in provider.go.
-// It unescapes backslashes (\\ -> \) and removes doubled single quotes ('' -> ').
+// It unescapes backslashes (\\ -> \) and removes doubled single quotes (” -> ').
 func unescapeRoleName(s string) string {
 	// Unescape doubled single quotes first, then backslashes
 	s = strings.ReplaceAll(s, "''", "'")
