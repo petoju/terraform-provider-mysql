@@ -63,7 +63,11 @@ func alterUserDefaultRoles(ctx context.Context, db *sql.DB, user, host string, r
 	stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' DEFAULT ROLE ", user, host)
 
 	if len(roles) > 0 {
-		stmtSQL += fmt.Sprintf("'%s'", strings.Join(roles, "', '"))
+		quotedRoles := make([]string, len(roles))
+		for i, role := range roles {
+			quotedRoles[i] = quoteRoleName(role)
+		}
+		stmtSQL += fmt.Sprintf("%s", strings.Join(quotedRoles, ", "))
 	} else {
 		stmtSQL += "NONE"
 	}

@@ -278,7 +278,11 @@ func (t *RoleGrant) GrantOption() bool {
 }
 
 func (t *RoleGrant) SQLGrantStatement() string {
-	stmtSql := fmt.Sprintf("GRANT '%s' TO %s", strings.Join(t.Roles, "', '"), t.UserOrRole.SQLString())
+	quotedRoles := make([]string, len(t.Roles))
+	for i, role := range t.Roles {
+		quotedRoles[i] = quoteRoleName(role)
+	}
+	stmtSql := fmt.Sprintf("GRANT %s TO %s", strings.Join(quotedRoles, ", "), t.UserOrRole.SQLString())
 	if t.TLSOption != "" && strings.ToLower(t.TLSOption) != "none" {
 		stmtSql += fmt.Sprintf(" REQUIRE %s", t.TLSOption)
 	}
@@ -289,7 +293,11 @@ func (t *RoleGrant) SQLGrantStatement() string {
 }
 
 func (t *RoleGrant) SQLRevokeStatement() string {
-	return fmt.Sprintf("REVOKE '%s' FROM %s", strings.Join(t.Roles, "', '"), t.UserOrRole.SQLString())
+	quotedRoles := make([]string, len(t.Roles))
+	for i, role := range t.Roles {
+		quotedRoles[i] = quoteRoleName(role)
+	}
+	return fmt.Sprintf("REVOKE %s FROM %s", strings.Join(quotedRoles, ", "), t.UserOrRole.SQLString())
 }
 
 func (t *RoleGrant) GetRoles() []string {
@@ -638,7 +646,7 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 
 	// Parse the grant from ResourceData
 	grant, diagErr := parseResourceFromData(d)
-	if err != nil {
+	if diagErr != nil {
 		return diagErr
 	}
 
@@ -768,12 +776,19 @@ func setDataFromGrant(grant MySQLGrant, d *schema.ResourceData) *schema.Resource
 		d.Set("database", tablePrivGrant.Database)
 	}
 
-	// This is a bit of a hack, since we don't have a way to distingush between users and roles
-	// from the grant itself. We can only infer it from the schema.
 	userOrRole := grant.GetUserOrRole()
-	if d.Get("role") != "" {
+	if _, ok := grant.(*RoleGrant); ok {
+		// This is a role grant - set the role attribute
 		d.Set("role", userOrRole.Name)
+		d.Set("user", "")
+		d.Set("host", "")
+	} else if d.Get("role") != "" {
+		// Role was specified in config
+		d.Set("role", userOrRole.Name)
+		d.Set("user", "")
+		d.Set("host", "")
 	} else {
+		// User grant
 		d.Set("user", userOrRole.Name)
 		d.Set("host", userOrRole.Host)
 	}
@@ -841,21 +856,22 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) 
 
 var (
 	// kUserOrRoleRegex matches user/role names with proper handling of backslash escape sequences
+	// and doubled single quotes (SQL standard escaping for single quotes in identifiers).
 	// Pattern handles: unquoted names, single-quoted names, double-quoted names, and backtick-quoted names
-	// For quoted names, it properly captures backslash-escaped characters (e.g., \' or \\)
-	kUserOrRoleRegex = regexp.MustCompile("['`]?((?:[^'`\"\\\\]|\\\\.)*)['`]?(?:@['\"]?((?:[^'`\"\\\\]|\\\\.)*)['\"]?)?")
+	// For quoted names, it properly captures backslash-escaped characters (e.g., \' or \\) and doubled single quotes ('')
+	kUserOrRoleRegex = regexp.MustCompile("['`]?((?:[^'`\"\\\\@]|\\\\.|'')*)['`]?(?:@['\"]?((?:[^'`\"\\\\]|\\\\.|'')*)['\"]?)?")
 )
 
 func parseUserOrRoleFromRow(userOrRoleStr string) (*UserOrRole, error) {
 	userHostMatches := kUserOrRoleRegex.FindStringSubmatch(userOrRoleStr)
 	if len(userHostMatches) == 3 {
 		return &UserOrRole{
-			Name: userHostMatches[1],
-			Host: userHostMatches[2],
+			Name: unescapeRoleName(userHostMatches[1]),
+			Host: unescapeRoleName(userHostMatches[2]),
 		}, nil
 	} else if len(userHostMatches) == 2 {
 		return &UserOrRole{
-			Name: userHostMatches[1],
+			Name: unescapeRoleName(userHostMatches[1]),
 			Host: "%",
 		}, nil
 	} else {
@@ -964,7 +980,12 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 		roles := make([]string, len(rolesStart))
 
 		for i, role := range rolesStart {
-			role = strings.Trim(role, "`'@%\" ")
+			role = strings.TrimSpace(role)
+			// Remove outer quotes if present
+			if len(role) >= 2 && ((role[0] == '`' && role[len(role)-1] == '`') ||
+				(role[0] == '\'' && role[len(role)-1] == '\'')) {
+				role = role[1 : len(role)-1]
+			}
 			roles[i] = unescapeRoleName(role)
 		}
 
@@ -988,11 +1009,16 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 }
 
 // unescapeRoleName reverses the escaping done by quoteRoleName in provider.go.
-// It unescapes backslashes (\\ -> \) and removes doubled single quotes (” -> ').
+// It handles backslash-escaping (from Terraform import double-escaping), doubled backticks
+// (for backtick-quoted identifiers), and doubled single quotes (for backward compatibility
+// with single-quoted strings).
 func unescapeRoleName(s string) string {
-	// Unescape doubled single quotes first, then backslashes
-	s = strings.ReplaceAll(s, "''", "'")
+	// Unescape doubled backslashes first (handles Terraform import double-escaping)
 	s = strings.ReplaceAll(s, "\\\\", "\\")
+	// Handle doubled backticks (for backtick-quoted identifiers)
+	s = strings.ReplaceAll(s, "``", "`")
+	// Handle doubled single quotes (for backward compatibility with single-quoted strings)
+	s = strings.ReplaceAll(s, "''", "'")
 	return s
 }
 

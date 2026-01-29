@@ -35,6 +35,7 @@ func CreateRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	roleName := d.Get("name").(string)
+	log.Printf("[DEBUG] CreateRole: roleName=%q, escaped=%q", roleName, quoteRoleName(roleName))
 
 	sql := fmt.Sprintf("CREATE ROLE %s", quoteRoleName(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
@@ -55,13 +56,15 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteRoleName(d.Id()))
+	roleName := unescapeRoleName(d.Id())
+	log.Printf("[DEBUG] ReadRole: d.Id()=%q, unescaped=%q, escaped=%q", d.Id(), roleName, quoteRoleName(roleName))
+	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteRoleName(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	rows, err := db.QueryContext(ctx, sql)
 	if err != nil {
 		errorNumber := mysqlErrorNumber(err)
-		if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode {
+		if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode || errorNumber == nonExistingGrantErrCode {
 			d.SetId("")
 			return nil
 		}
@@ -74,7 +77,8 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return nil
 	}
 
-	d.Set("name", d.Id())
+	d.SetId(roleName)
+	d.Set("name", roleName)
 
 	return nil
 }

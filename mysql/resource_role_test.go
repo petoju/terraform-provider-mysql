@@ -113,11 +113,14 @@ func testAccRoleCheckDestroy(roleName string) resource.TestCheckFunc {
 }
 
 func testAccRoleConfigBasic(roleName string) string {
+	// Escape backslashes first, then double quotes for HCL string literal
+	escaped := strings.ReplaceAll(roleName, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 	return fmt.Sprintf(`
 resource "mysql_role" "test" {
   name = "%s"
 }
-`, roleName)
+`, escaped)
 }
 
 func testAccRoleConfigDifferent(roleName string) string {
