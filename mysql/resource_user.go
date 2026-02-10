@@ -347,9 +347,11 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	// Add resource limits if specified
+	// Note: MySQL 5.6 does NOT support CREATE USER ... WITH for resource limits
+	// MySQL 5.7.6+ supports both CREATE USER ... WITH and ALTER USER ... WITH
+	// For MySQL < 5.7.6, we need to use GRANT USAGE after CREATE USER
+	var resourceLimits []string
 	if createObj != "AADUSER" {
-		var resourceLimits []string
-
 		// MAX_USER_CONNECTIONS - supported on both MySQL and MariaDB
 		if maxConn, ok := d.GetOk("max_user_connections"); ok {
 			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_USER_CONNECTIONS %d", maxConn.(int)))
@@ -363,7 +365,9 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_STATEMENT_TIME %f", maxStmt.(float64)))
 		}
 
-		if len(resourceLimits) > 0 {
+		// MySQL 5.7.6+ supports CREATE USER ... WITH for resource limits
+		createUserWithVersion, _ := version.NewVersion("5.7.6")
+		if len(resourceLimits) > 0 && getVersionFromMeta(ctx, meta).GreaterThanOrEqual(createUserWithVersion) {
 			stmtSQL += " WITH " + strings.Join(resourceLimits, " ")
 		}
 	}
@@ -381,6 +385,20 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
 		return diag.Errorf("failed executing SQL: %v", err)
+	}
+
+	// For MySQL < 5.7.6, use GRANT USAGE to set resource limits after CREATE USER
+	createUserWithVersion, _ := version.NewVersion("5.7.6")
+	if createObj != "AADUSER" && len(resourceLimits) > 0 && getVersionFromMeta(ctx, meta).LessThan(createUserWithVersion) {
+		grantStmtSQL := fmt.Sprintf("GRANT USAGE ON *.* TO %s WITH %s",
+			formatUserIdentifier(user, host),
+			strings.Join(resourceLimits, " "))
+
+		log.Println("[DEBUG] Executing statement:", grantStmtSQL)
+		_, err = db.ExecContext(ctx, grantStmtSQL)
+		if err != nil {
+			return diag.Errorf("failed setting user resource limits: %v", err)
+		}
 	}
 
 	userId := fmt.Sprintf("%s@%s", user, host)
@@ -526,6 +544,8 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	// Handle resource limits changes (Option B: field removal resets to 0)
+	// MySQL 5.6: ALTER USER only supports PASSWORD EXPIRE, use GRANT USAGE for resource limits
+	// MySQL 5.7.6+: ALTER USER supports WITH clause for resource limits
 	if d.HasChange("max_user_connections") || d.HasChange("max_statement_time") {
 		var resourceLimits []string
 
@@ -556,9 +576,22 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		}
 
 		if len(resourceLimits) > 0 {
-			stmtSQL := fmt.Sprintf("ALTER USER %s WITH %s",
-				formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)),
-				strings.Join(resourceLimits, " "))
+			var stmtSQL string
+
+			// MySQL versions before 5.7.6 don't support ALTER USER with WITH clause
+			// Use GRANT USAGE instead for older versions
+			alterUserVersion, _ := version.NewVersion("5.7.6")
+			if getVersionFromMeta(ctx, meta).LessThan(alterUserVersion) {
+				// MySQL 5.6 and earlier: use GRANT USAGE
+				stmtSQL = fmt.Sprintf("GRANT USAGE ON *.* TO %s WITH %s",
+					formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)),
+					strings.Join(resourceLimits, " "))
+			} else {
+				// MySQL 5.7.6+: use ALTER USER
+				stmtSQL = fmt.Sprintf("ALTER USER %s WITH %s",
+					formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)),
+					strings.Join(resourceLimits, " "))
+			}
 
 			log.Println("[DEBUG] Executing query:", stmtSQL)
 			_, err := db.ExecContext(ctx, stmtSQL)
