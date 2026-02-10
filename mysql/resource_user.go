@@ -45,6 +45,24 @@ func resourceUser() *schema.Resource {
 			StateContext: ImportUser,
 		},
 
+		CustomizeDiff: func(ctx context.Context, d *schema.ResourceDiff, meta interface{}) error {
+			// Validate max_user_connections is not set on TiDB
+			if _, ok := d.GetOk("max_user_connections"); ok {
+				if err := checkMaxUserConnectionsSupport(ctx, meta); err != nil {
+					return err
+				}
+			}
+
+			// Validate max_statement_time is not set on non-MariaDB
+			if _, ok := d.GetOk("max_statement_time"); ok {
+				if err := checkMaxStatementTimeSupport(ctx, meta); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		},
+
 		Schema: map[string]*schema.Schema{
 			"user": {
 				Type:     schema.TypeString,
@@ -203,6 +221,33 @@ func isMariaDB(ctx context.Context, meta interface{}) (bool, error) {
 	return strings.Contains(versionString, "MariaDB"), nil
 }
 
+func isTiDB(ctx context.Context, meta interface{}) (bool, error) {
+	db, err := getDatabaseFromMeta(ctx, meta)
+	if err != nil {
+		return false, err
+	}
+
+	versionString, err := serverVersionString(db)
+	if err != nil {
+		return false, err
+	}
+
+	return strings.Contains(versionString, "TiDB"), nil
+}
+
+func checkMaxUserConnectionsSupport(ctx context.Context, meta interface{}) error {
+	isTiDB, err := isTiDB(ctx, meta)
+	if err != nil {
+		return err
+	}
+
+	if isTiDB {
+		return errors.New("MAX_USER_CONNECTIONS is not supported on TiDB")
+	}
+
+	return nil
+}
+
 func checkMaxStatementTimeSupport(ctx context.Context, meta interface{}) error {
 	isMariaDB, err := isMariaDB(ctx, meta)
 	if err != nil {
@@ -352,8 +397,11 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	// For MySQL < 5.7.6, we need to use GRANT USAGE after CREATE USER
 	var resourceLimits []string
 	if createObj != "AADUSER" {
-		// MAX_USER_CONNECTIONS - supported on both MySQL and MariaDB
+		// MAX_USER_CONNECTIONS - supported on MySQL and MariaDB, but not TiDB
 		if maxConn, ok := d.GetOk("max_user_connections"); ok {
+			if err := checkMaxUserConnectionsSupport(ctx, meta); err != nil {
+				return diag.FromErr(err)
+			}
 			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_USER_CONNECTIONS %d", maxConn.(int)))
 		}
 
@@ -551,11 +599,19 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 		// Handle MAX_USER_CONNECTIONS
 		if maxConn, ok := d.GetOk("max_user_connections"); ok {
-			// Field is present in config, set the value
+			// Field is present in config, validate and set the value
+			if err := checkMaxUserConnectionsSupport(ctx, meta); err != nil {
+				return diag.FromErr(err)
+			}
 			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_USER_CONNECTIONS %d", maxConn.(int)))
 		} else if d.HasChange("max_user_connections") {
 			// Field was removed from config, reset to 0 (unlimited)
-			resourceLimits = append(resourceLimits, "MAX_USER_CONNECTIONS 0")
+			// Only reset if we're not on TiDB (which doesn't support this feature)
+			if isTiDBVal, err := isTiDB(ctx, meta); err != nil {
+				return diag.FromErr(err)
+			} else if !isTiDBVal {
+				resourceLimits = append(resourceLimits, "MAX_USER_CONNECTIONS 0")
+			}
 		}
 
 		// Handle MAX_STATEMENT_TIME (MariaDB only)

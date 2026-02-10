@@ -888,7 +888,7 @@ resource "mysql_user" "test" {
 // Resource limits tests
 func TestAccUser_resourceLimits(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
+		PreCheck:          func() { testAccPreCheck(t); testAccPreCheckSkipTiDB(t) },
 		ProviderFactories: testAccProviderFactories,
 		CheckDestroy:      testAccUserCheckDestroy,
 		Steps: []resource.TestStep{
@@ -989,6 +989,7 @@ func TestAccUser_resourceLimitsErrorOnMySQL(t *testing.T) {
 		PreCheck: func() {
 			testAccPreCheck(t)
 			testAccPreCheckSkipMariaDB(t)
+			testAccPreCheckSkipTiDB(t) // TiDB doesn't support resource limits, test is MySQL-specific
 		},
 		ProviderFactories: testAccProviderFactories,
 		CheckDestroy:      testAccUserCheckDestroy,
@@ -996,6 +997,24 @@ func TestAccUser_resourceLimitsErrorOnMySQL(t *testing.T) {
 			{
 				Config:      testAccUserConfig_resourceLimitsErrorMySQL,
 				ExpectError: regexp.MustCompile("MAX_STATEMENT_TIME is only supported on MariaDB"),
+			},
+		},
+	})
+}
+
+// Test that MAX_USER_CONNECTIONS fails on TiDB with a clear error message
+func TestAccUser_resourceLimitsErrorOnTiDB(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipNotTiDB(t) // This test is TiDB-specific
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccUserConfig_resourceLimitsErrorTiDB,
+				ExpectError: regexp.MustCompile("MAX_USER_CONNECTIONS is not supported on TiDB"),
 			},
 		},
 	})
@@ -1125,5 +1144,14 @@ resource "mysql_user" "test" {
     host                 = "%"
     plaintext_password   = "password"
     max_statement_time   = 30.0
+}
+`
+
+const testAccUserConfig_resourceLimitsErrorTiDB = `
+resource "mysql_user" "test" {
+    user                 = "error_user_tidb"
+    host                 = "%"
+    plaintext_password   = "password"
+    max_user_connections = 10
 }
 `
