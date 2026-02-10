@@ -884,3 +884,246 @@ resource "mysql_user" "test" {
     password_wo_version = 2
 }
 `
+
+// Resource limits tests
+func TestAccUser_resourceLimits(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserConfig_resourceLimits,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "limited_user"),
+					resource.TestCheckResourceAttr("mysql_user.test", "max_user_connections", "10"),
+					testAccUserResourceLimitsMaxConn("limited_user", "%", 10),
+				),
+			},
+			{
+				Config: testAccUserConfig_resourceLimitsUpdated,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "max_user_connections", "20"),
+					testAccUserResourceLimitsMaxConn("limited_user", "%", 20),
+				),
+			},
+			{
+				Config: testAccUserConfig_resourceLimitsRemoved,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					testAccUserResourceLimitsMaxConn("limited_user", "%", 0),
+				),
+			},
+		},
+	})
+}
+
+// MariaDB-specific test with MAX_STATEMENT_TIME
+func TestAccUser_resourceLimitsMariaDB(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckRequireMariaDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserConfig_resourceLimitsMariaDB,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "limited_user_mariadb"),
+					resource.TestCheckResourceAttr("mysql_user.test", "max_user_connections", "15"),
+					resource.TestCheckResourceAttr("mysql_user.test", "max_statement_time", "30.5"),
+					testAccUserResourceLimitsMariaDB("limited_user_mariadb", "%", 15, 30.5),
+				),
+			},
+			{
+				Config: testAccUserConfig_resourceLimitsMariaDBUpdated,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "max_user_connections", "25"),
+					resource.TestCheckResourceAttr("mysql_user.test", "max_statement_time", "45.5"),
+					testAccUserResourceLimitsMariaDB("limited_user_mariadb", "%", 25, 45.5),
+				),
+			},
+			{
+				Config: testAccUserConfig_resourceLimitsMariaDBRemoved,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					testAccUserResourceLimitsMariaDB("limited_user_mariadb", "%", 0, 0),
+				),
+			},
+		},
+	})
+}
+
+// Test fractional MAX_STATEMENT_TIME on MariaDB
+func TestAccUser_resourceLimitsFractional(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckRequireMariaDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUserConfig_resourceLimitsFractional,
+				Check: resource.ComposeTestCheckFunc(
+					testAccUserExists("mysql_user.test"),
+					resource.TestCheckResourceAttr("mysql_user.test", "user", "fractional_user"),
+					resource.TestCheckResourceAttr("mysql_user.test", "max_statement_time", "0.01"),
+					testAccUserResourceLimitsMariaDB("fractional_user", "%", 0, 0.01),
+				),
+			},
+		},
+	})
+}
+
+// Test that MAX_STATEMENT_TIME fails on MySQL
+func TestAccUser_resourceLimitsErrorOnMySQL(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipMariaDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccUserCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccUserConfig_resourceLimitsErrorMySQL,
+				ExpectError: regexp.MustCompile("MAX_STATEMENT_TIME is only supported on MariaDB"),
+			},
+		},
+	})
+}
+
+// Helper function to verify MAX_USER_CONNECTIONS in database
+func testAccUserResourceLimitsMaxConn(user, host string, expectedMaxConn int) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+
+		var maxUserConn int
+
+		query := fmt.Sprintf("SELECT max_user_connections FROM mysql.user WHERE user='%s' AND host='%s'", user, host)
+		err = db.QueryRow(query).Scan(&maxUserConn)
+		if err != nil {
+			return fmt.Errorf("error reading user resource limits: %s", err)
+		}
+
+		if maxUserConn != expectedMaxConn {
+			return fmt.Errorf("expected max_user_connections %d, got %d", expectedMaxConn, maxUserConn)
+		}
+
+		return nil
+	}
+}
+
+// Helper function to verify both MAX_USER_CONNECTIONS and MAX_STATEMENT_TIME in MariaDB
+func testAccUserResourceLimitsMariaDB(user, host string, expectedMaxConn int, expectedMaxStmt float64) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+
+		var maxUserConn int
+		var maxStmtTime float64
+
+		query := fmt.Sprintf("SELECT max_user_connections, max_statement_time FROM mysql.user WHERE user='%s' AND host='%s'", user, host)
+		err = db.QueryRow(query).Scan(&maxUserConn, &maxStmtTime)
+		if err != nil {
+			return fmt.Errorf("error reading user resource limits: %s", err)
+		}
+
+		if maxUserConn != expectedMaxConn {
+			return fmt.Errorf("expected max_user_connections %d, got %d", expectedMaxConn, maxUserConn)
+		}
+
+		if maxStmtTime != expectedMaxStmt {
+			return fmt.Errorf("expected max_statement_time %f, got %f", expectedMaxStmt, maxStmtTime)
+		}
+
+		return nil
+	}
+}
+
+const testAccUserConfig_resourceLimits = `
+resource "mysql_user" "test" {
+    user                 = "limited_user"
+    host                 = "%"
+    plaintext_password   = "password"
+    max_user_connections = 10
+}
+`
+
+const testAccUserConfig_resourceLimitsUpdated = `
+resource "mysql_user" "test" {
+    user                 = "limited_user"
+    host                 = "%"
+    plaintext_password   = "password"
+    max_user_connections = 20
+}
+`
+
+const testAccUserConfig_resourceLimitsRemoved = `
+resource "mysql_user" "test" {
+    user               = "limited_user"
+    host               = "%"
+    plaintext_password = "password"
+}
+`
+
+const testAccUserConfig_resourceLimitsMariaDB = `
+resource "mysql_user" "test" {
+    user                 = "limited_user_mariadb"
+    host                 = "%"
+    plaintext_password   = "password"
+    max_user_connections = 15
+    max_statement_time   = 30.5
+}
+`
+
+const testAccUserConfig_resourceLimitsMariaDBUpdated = `
+resource "mysql_user" "test" {
+    user                 = "limited_user_mariadb"
+    host                 = "%"
+    plaintext_password   = "password"
+    max_user_connections = 25
+    max_statement_time   = 45.5
+}
+`
+
+const testAccUserConfig_resourceLimitsMariaDBRemoved = `
+resource "mysql_user" "test" {
+    user               = "limited_user_mariadb"
+    host               = "%"
+    plaintext_password = "password"
+}
+`
+
+const testAccUserConfig_resourceLimitsFractional = `
+resource "mysql_user" "test" {
+    user                 = "fractional_user"
+    host                 = "%"
+    plaintext_password   = "password"
+    max_statement_time   = 0.01
+}
+`
+
+const testAccUserConfig_resourceLimitsErrorMySQL = `
+resource "mysql_user" "test" {
+    user                 = "error_user"
+    host                 = "%"
+    plaintext_password   = "password"
+    max_statement_time   = 30.0
+}
+`

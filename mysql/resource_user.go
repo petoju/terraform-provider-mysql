@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/go-cty/cty"
@@ -154,6 +155,20 @@ func resourceUser() *schema.Resource {
 				Optional: true,
 				Default:  false,
 			},
+
+			"max_user_connections": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ValidateFunc: validation.IntAtLeast(0),
+				Description:  "Maximum number of simultaneous connections for the user (0 = unlimited). Supported on MySQL 5.0+ and MariaDB.",
+			},
+
+			"max_statement_time": {
+				Type:         schema.TypeFloat,
+				Optional:     true,
+				ValidateFunc: validation.FloatAtLeast(0),
+				Description:  "Maximum execution time for statements in seconds (0 = unlimited). Supports fractional values (e.g., 0.01 for 10ms, 30.5 for 30.5s). Only supported on MariaDB 10.1.1+, not MySQL.",
+			},
 		},
 	}
 }
@@ -171,6 +186,41 @@ func checkDiscardOldPasswordSupport(ctx context.Context, meta interface{}) error
 	if getVersionFromMeta(ctx, meta).LessThan(ver) {
 		return errors.New("MySQL version must be at least 8.0.14")
 	}
+	return nil
+}
+
+func isMariaDB(ctx context.Context, meta interface{}) (bool, error) {
+	db, err := getDatabaseFromMeta(ctx, meta)
+	if err != nil {
+		return false, err
+	}
+
+	versionString, err := serverVersionString(db)
+	if err != nil {
+		return false, err
+	}
+
+	return strings.Contains(versionString, "MariaDB"), nil
+}
+
+func checkMaxStatementTimeSupport(ctx context.Context, meta interface{}) error {
+	isMariaDB, err := isMariaDB(ctx, meta)
+	if err != nil {
+		return err
+	}
+
+	if !isMariaDB {
+		return errors.New("MAX_STATEMENT_TIME is only supported on MariaDB 10.1.1+, not MySQL")
+	}
+
+	// Check MariaDB version
+	currentVer := getVersionFromMeta(ctx, meta)
+	minVer, _ := version.NewVersion("10.1.1")
+
+	if currentVer.LessThan(minVer) {
+		return fmt.Errorf("MAX_STATEMENT_TIME requires MariaDB 10.1.1 or newer (current version: %s)", currentVer.String())
+	}
+
 	return nil
 }
 
@@ -293,6 +343,28 @@ func CreateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 			updateArgs = []interface{}{}
 		} else {
 			stmtSQL += " REQUIRE " + d.Get("tls_option").(string)
+		}
+	}
+
+	// Add resource limits if specified
+	if createObj != "AADUSER" {
+		var resourceLimits []string
+
+		// MAX_USER_CONNECTIONS - supported on both MySQL and MariaDB
+		if maxConn, ok := d.GetOk("max_user_connections"); ok {
+			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_USER_CONNECTIONS %d", maxConn.(int)))
+		}
+
+		// MAX_STATEMENT_TIME - MariaDB only
+		if maxStmt, ok := d.GetOk("max_statement_time"); ok {
+			if err := checkMaxStatementTimeSupport(ctx, meta); err != nil {
+				return diag.FromErr(err)
+			}
+			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_STATEMENT_TIME %f", maxStmt.(float64)))
+		}
+
+		if len(resourceLimits) > 0 {
+			stmtSQL += " WITH " + strings.Join(resourceLimits, " ")
 		}
 	}
 
@@ -453,6 +525,49 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		}
 	}
 
+	// Handle resource limits changes (Option B: field removal resets to 0)
+	if d.HasChange("max_user_connections") || d.HasChange("max_statement_time") {
+		var resourceLimits []string
+
+		// Handle MAX_USER_CONNECTIONS
+		if maxConn, ok := d.GetOk("max_user_connections"); ok {
+			// Field is present in config, set the value
+			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_USER_CONNECTIONS %d", maxConn.(int)))
+		} else if d.HasChange("max_user_connections") {
+			// Field was removed from config, reset to 0 (unlimited)
+			resourceLimits = append(resourceLimits, "MAX_USER_CONNECTIONS 0")
+		}
+
+		// Handle MAX_STATEMENT_TIME (MariaDB only)
+		if maxStmt, ok := d.GetOk("max_statement_time"); ok {
+			// Field is present in config, validate and set the value
+			if err := checkMaxStatementTimeSupport(ctx, meta); err != nil {
+				return diag.FromErr(err)
+			}
+			resourceLimits = append(resourceLimits, fmt.Sprintf("MAX_STATEMENT_TIME %f", maxStmt.(float64)))
+		} else if d.HasChange("max_statement_time") {
+			// Field was removed from config, reset to 0 (unlimited)
+			// Only reset if we're on MariaDB (no need to check version, just database type)
+			if isMariaDBVal, err := isMariaDB(ctx, meta); err != nil {
+				return diag.FromErr(err)
+			} else if isMariaDBVal {
+				resourceLimits = append(resourceLimits, "MAX_STATEMENT_TIME 0")
+			}
+		}
+
+		if len(resourceLimits) > 0 {
+			stmtSQL := fmt.Sprintf("ALTER USER %s WITH %s",
+				formatUserIdentifier(d.Get("user").(string), d.Get("host").(string)),
+				strings.Join(resourceLimits, " "))
+
+			log.Println("[DEBUG] Executing query:", stmtSQL)
+			_, err := db.ExecContext(ctx, stmtSQL)
+			if err != nil {
+				return diag.Errorf("failed setting user resource limits: %v", err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -545,6 +660,34 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 					d.Set("auth_string_hex", "")
 				}
 			}
+
+			// Parse resource limits from WITH clause if present
+			// Only set in state if the field is currently being managed (Option B behavior)
+			withRe := regexp.MustCompile(`WITH\s+(.*)$`)
+			if withMatch := withRe.FindStringSubmatch(createUserStmt); len(withMatch) > 1 {
+				withClause := withMatch[1]
+
+				// Parse MAX_USER_CONNECTIONS
+				if _, ok := d.GetOk("max_user_connections"); ok {
+					maxConnRe := regexp.MustCompile(`MAX_USER_CONNECTIONS\s+(\d+)`)
+					if connMatch := maxConnRe.FindStringSubmatch(withClause); len(connMatch) > 1 {
+						if maxConn, err := strconv.Atoi(connMatch[1]); err == nil {
+							d.Set("max_user_connections", maxConn)
+						}
+					}
+				}
+
+				// Parse MAX_STATEMENT_TIME
+				if _, ok := d.GetOk("max_statement_time"); ok {
+					maxStmtRe := regexp.MustCompile(`MAX_STATEMENT_TIME\s+([\d.]+)`)
+					if stmtMatch := maxStmtRe.FindStringSubmatch(withClause); len(stmtMatch) > 1 {
+						if maxStmt, err := strconv.ParseFloat(stmtMatch[1], 64); err == nil {
+							d.Set("max_statement_time", maxStmt)
+						}
+					}
+				}
+			}
+
 			return nil
 		}
 
@@ -552,6 +695,32 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		re2 := regexp.MustCompile("^CREATE USER")
 		if m := re2.FindStringSubmatch(createUserStmt); m != nil {
 			// Ok, we have at least something - it's probably in MariaDB.
+			// Parse resource limits from WITH clause if present (MariaDB format)
+			withRe := regexp.MustCompile(`WITH\s+(.*)$`)
+			if withMatch := withRe.FindStringSubmatch(createUserStmt); len(withMatch) > 1 {
+				withClause := withMatch[1]
+
+				// Parse MAX_USER_CONNECTIONS
+				if _, ok := d.GetOk("max_user_connections"); ok {
+					maxConnRe := regexp.MustCompile(`MAX_USER_CONNECTIONS\s+(\d+)`)
+					if connMatch := maxConnRe.FindStringSubmatch(withClause); len(connMatch) > 1 {
+						if maxConn, err := strconv.Atoi(connMatch[1]); err == nil {
+							d.Set("max_user_connections", maxConn)
+						}
+					}
+				}
+
+				// Parse MAX_STATEMENT_TIME
+				if _, ok := d.GetOk("max_statement_time"); ok {
+					maxStmtRe := regexp.MustCompile(`MAX_STATEMENT_TIME\s+([\d.]+)`)
+					if stmtMatch := maxStmtRe.FindStringSubmatch(withClause); len(stmtMatch) > 1 {
+						if maxStmt, err := strconv.ParseFloat(stmtMatch[1], 64); err == nil {
+							d.Set("max_statement_time", maxStmt)
+						}
+					}
+				}
+			}
+
 			return nil
 		}
 		return diag.Errorf("Create user couldn't be parsed - it is %s", createUserStmt)

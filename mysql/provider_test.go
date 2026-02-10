@@ -274,6 +274,27 @@ func testAccPreCheckSkipMariaDB(t *testing.T) {
 	}
 }
 
+func testAccPreCheckRequireMariaDB(t *testing.T) {
+	testAccPreCheck(t)
+
+	ctx := context.Background()
+	db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+	if err != nil {
+		t.Fatalf("Cannot connect to DB (RequireMariaDB): %v", err)
+		return
+	}
+
+	currentVersionString, err := serverVersionString(db)
+	if err != nil {
+		t.Fatalf("Cannot get DB version string (RequireMariaDB): %v", err)
+		return
+	}
+
+	if !strings.Contains(currentVersionString, "MariaDB") {
+		t.Skip("Test requires MariaDB")
+	}
+}
+
 func testAccPreCheckSkipNotMySQL8(t *testing.T) {
 	testAccPreCheckSkipNotMySQLVersionMin(t, "8.0.0")
 }

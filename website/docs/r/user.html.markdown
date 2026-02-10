@@ -82,6 +82,35 @@ resource "mysql_user" "aadupn" {
 
 ~> **Note on Azure Database for MySQL Single Server resource:** If you want to use this for `service_principal` with older Azure Database for MySQL Single Server resource, you need to set param `aad_auth_validate_oids_in_tenant` to `OFF` in provider configuration. For more details see [this issue](https://github.com/petoju/terraform-provider-mysql/issues/79).
 
+## Example Usage with Resource Limits
+
+```hcl
+# MySQL and MariaDB: Set MAX_USER_CONNECTIONS
+resource "mysql_user" "limited" {
+  user                 = "app_user"
+  host                 = "%"
+  plaintext_password   = "password"
+  max_user_connections = 100
+}
+
+# MariaDB only: Set both MAX_USER_CONNECTIONS and MAX_STATEMENT_TIME
+resource "mysql_user" "limited_mariadb" {
+  user                 = "app_user"
+  host                 = "%"
+  plaintext_password   = "password"
+  max_user_connections = 100
+  max_statement_time   = 30.0  # 30 seconds
+}
+
+# MariaDB only: Fractional values for subsecond precision
+resource "mysql_user" "limited_precise" {
+  user                 = "app_user"
+  host                 = "%"
+  plaintext_password   = "password"
+  max_statement_time   = 0.5  # 500 milliseconds
+}
+```
+
 ## Argument Reference
 
 The following arguments are supported:
@@ -99,6 +128,8 @@ The following arguments are supported:
 * `retain_old_password` - (Optional) When `true`, the old password is retained when changing the password. Defaults to `false`. This use MySQL Dual Password Support feature and requires MySQL version 8.0.14 or newer. See [MySQL Dual Password documentation](https://dev.mysql.com/doc/refman/8.0/en/password-management.html#dual-passwords) for more.
 * `discard_old_password` - (Optional) When `true`, the old password is deleted. Defaults to `false`. This use MySQL Dual Password Support feature and requires MySQL version 8.0.14 or newer. See [MySQL Dual Password documentation](https://dev.mysql.com/doc/refman/8.0/en/password-management.html#dual-passwords) for more.
 * `tls_option` - (Optional) An TLS-Option for the `CREATE USER` or `ALTER USER` statement. The value is suffixed to `REQUIRE`. A value of 'SSL' will generate a `CREATE USER ... REQUIRE SSL` statement. See the [MYSQL `CREATE USER` documentation](https://dev.mysql.com/doc/refman/5.7/en/create-user.html) for more. Ignored if MySQL version is under 5.7.0.
+* `max_user_connections` - (Optional) Maximum number of simultaneous connections the user can have. A value of `0` (the default) means unlimited. Supported on MySQL 5.0+ and all MariaDB versions. When this argument is removed from the configuration, the limit is reset to `0` (unlimited).
+* `max_statement_time` - (Optional) Maximum execution time for statements in seconds. A value of `0` (the default) means unlimited. Supports fractional values for subsecond precision (e.g., `0.01` for 10 milliseconds, `30.5` for 30.5 seconds). **Only supported on MariaDB 10.1.1 or newer.** Attempting to use this on MySQL will result in an error. When this argument is removed from the configuration, the limit is reset to `0` (unlimited).
 
 [ref-auth-plugins]: https://dev.mysql.com/doc/refman/5.7/en/authentication-plugins.html
 
