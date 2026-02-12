@@ -998,6 +998,11 @@ func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]M
 		return nil, fmt.Errorf("showUserGrants - getting grants failed: %w", err)
 	}
 
+	ver, err := serverVersionString(db)
+	if err != nil {
+		return nil, fmt.Errorf("showUserGrants - getting server version failed: %w", err)
+	}
+
 	defer rows.Close()
 	for rows.Next() {
 		var rawGrant string
@@ -1013,6 +1018,18 @@ func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]M
 		}
 		if parsedGrant == nil {
 			continue
+		}
+
+		if strings.HasSuffix(ver, "-google") {
+			ignored := UserOrRole{
+				Name: "cloudiamgroup",
+			}
+			if parsedGrant.GetUserOrRole().Equals(ignored) {
+				// we can't handle cloudiamgroup on GCP cloudsql
+				// see: https://github.com/petoju/terraform-provider-mysql/issues/254
+				log.Printf("[DEBUG] Skipping grant cloudiamgroup on CloudSQL")
+				continue
+			}
 		}
 
 		// Filter out any grants that don't match the provided user
