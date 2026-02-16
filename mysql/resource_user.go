@@ -207,36 +207,13 @@ func checkDiscardOldPasswordSupport(ctx context.Context, meta interface{}) error
 	return nil
 }
 
-func isMariaDB(ctx context.Context, meta interface{}) (bool, error) {
-	db, err := getDatabaseFromMeta(ctx, meta)
-	if err != nil {
-		return false, err
-	}
-
-	versionString, err := serverVersionString(db)
-	if err != nil {
-		return false, err
-	}
-
-	return strings.Contains(versionString, "MariaDB"), nil
-}
-
-func isTiDB(ctx context.Context, meta interface{}) (bool, error) {
-	db, err := getDatabaseFromMeta(ctx, meta)
-	if err != nil {
-		return false, err
-	}
-
-	versionString, err := serverVersionString(db)
-	if err != nil {
-		return false, err
-	}
-
-	return strings.Contains(versionString, "TiDB"), nil
-}
-
 func checkMaxUserConnectionsSupport(ctx context.Context, meta interface{}) error {
-	isTiDB, err := isTiDB(ctx, meta)
+	db, err := getDatabaseFromMeta(ctx, meta)
+	if err != nil {
+		return err
+	}
+
+	isTiDB, _, _, err := serverTiDB(db)
 	if err != nil {
 		return err
 	}
@@ -249,7 +226,12 @@ func checkMaxUserConnectionsSupport(ctx context.Context, meta interface{}) error
 }
 
 func checkMaxStatementTimeSupport(ctx context.Context, meta interface{}) error {
-	isMariaDB, err := isMariaDB(ctx, meta)
+	db, err := getDatabaseFromMeta(ctx, meta)
+	if err != nil {
+		return err
+	}
+
+	isMariaDB, err := serverMariaDB(db)
 	if err != nil {
 		return err
 	}
@@ -607,10 +589,14 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		} else if d.HasChange("max_user_connections") {
 			// Field was removed from config, reset to 0 (unlimited)
 			// Only reset if we're not on TiDB (which doesn't support this feature)
-			if isTiDBVal, err := isTiDB(ctx, meta); err != nil {
+			isTiDBVal, _, _, err := serverTiDB(db)
+			if err != nil {
 				return diag.FromErr(err)
-			} else if !isTiDBVal {
+			}
+			if !isTiDBVal {
 				resourceLimits = append(resourceLimits, "MAX_USER_CONNECTIONS 0")
+			} else {
+				return diag.Errorf("cannot reset max_user_connections on TiDB: MAX_USER_CONNECTIONS is not supported on TiDB")
 			}
 		}
 
@@ -624,9 +610,11 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		} else if d.HasChange("max_statement_time") {
 			// Field was removed from config, reset to 0 (unlimited)
 			// Only reset if we're on MariaDB (no need to check version, just database type)
-			if isMariaDBVal, err := isMariaDB(ctx, meta); err != nil {
+			isMariaDBVal, err := serverMariaDB(db)
+			if err != nil {
 				return diag.FromErr(err)
-			} else if isMariaDBVal {
+			}
+			if isMariaDBVal {
 				resourceLimits = append(resourceLimits, "MAX_STATEMENT_TIME 0")
 			}
 		}
@@ -658,6 +646,29 @@ func UpdateUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	return nil
+}
+
+// parseWithClauseSetting extracts and sets a resource limit from the WITH clause
+func parseWithClauseSetting(d *schema.ResourceData, withClause, fieldName, settingName string, parseAsFloat bool) {
+	// Only set if the field is currently being managed (Option B behavior)
+	if _, ok := d.GetOk(fieldName); !ok {
+		return
+	}
+
+	pattern := fmt.Sprintf(`%s\s+([\d.]+)`, settingName)
+	re := regexp.MustCompile(pattern)
+
+	if match := re.FindStringSubmatch(withClause); len(match) > 1 {
+		if parseAsFloat {
+			if value, err := strconv.ParseFloat(match[1], 64); err == nil {
+				d.Set(fieldName, value)
+			}
+		} else {
+			if value, err := strconv.Atoi(match[1]); err == nil {
+				d.Set(fieldName, value)
+			}
+		}
+	}
 }
 
 func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -751,30 +762,16 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 			}
 
 			// Parse resource limits from WITH clause if present
-			// Only set in state if the field is currently being managed (Option B behavior)
+			// Examples of WITH clause in CREATE USER:
+			// CREATE USER 'user'@'host' ... WITH MAX_USER_CONNECTIONS 10
+			// CREATE USER 'user'@'host' ... WITH MAX_STATEMENT_TIME 30.5 (MariaDB only)
+			// CREATE USER 'user'@'host' ... WITH MAX_USER_CONNECTIONS 5 MAX_STATEMENT_TIME 60.0
 			withRe := regexp.MustCompile(`WITH\s+(.*)$`)
 			if withMatch := withRe.FindStringSubmatch(createUserStmt); len(withMatch) > 1 {
 				withClause := withMatch[1]
 
-				// Parse MAX_USER_CONNECTIONS
-				if _, ok := d.GetOk("max_user_connections"); ok {
-					maxConnRe := regexp.MustCompile(`MAX_USER_CONNECTIONS\s+(\d+)`)
-					if connMatch := maxConnRe.FindStringSubmatch(withClause); len(connMatch) > 1 {
-						if maxConn, err := strconv.Atoi(connMatch[1]); err == nil {
-							d.Set("max_user_connections", maxConn)
-						}
-					}
-				}
-
-				// Parse MAX_STATEMENT_TIME
-				if _, ok := d.GetOk("max_statement_time"); ok {
-					maxStmtRe := regexp.MustCompile(`MAX_STATEMENT_TIME\s+([\d.]+)`)
-					if stmtMatch := maxStmtRe.FindStringSubmatch(withClause); len(stmtMatch) > 1 {
-						if maxStmt, err := strconv.ParseFloat(stmtMatch[1], 64); err == nil {
-							d.Set("max_statement_time", maxStmt)
-						}
-					}
-				}
+				parseWithClauseSetting(d, withClause, "max_user_connections", "MAX_USER_CONNECTIONS", false)
+				parseWithClauseSetting(d, withClause, "max_statement_time", "MAX_STATEMENT_TIME", true)
 			}
 
 			return nil
@@ -789,25 +786,8 @@ func ReadUser(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 			if withMatch := withRe.FindStringSubmatch(createUserStmt); len(withMatch) > 1 {
 				withClause := withMatch[1]
 
-				// Parse MAX_USER_CONNECTIONS
-				if _, ok := d.GetOk("max_user_connections"); ok {
-					maxConnRe := regexp.MustCompile(`MAX_USER_CONNECTIONS\s+(\d+)`)
-					if connMatch := maxConnRe.FindStringSubmatch(withClause); len(connMatch) > 1 {
-						if maxConn, err := strconv.Atoi(connMatch[1]); err == nil {
-							d.Set("max_user_connections", maxConn)
-						}
-					}
-				}
-
-				// Parse MAX_STATEMENT_TIME
-				if _, ok := d.GetOk("max_statement_time"); ok {
-					maxStmtRe := regexp.MustCompile(`MAX_STATEMENT_TIME\s+([\d.]+)`)
-					if stmtMatch := maxStmtRe.FindStringSubmatch(withClause); len(stmtMatch) > 1 {
-						if maxStmt, err := strconv.ParseFloat(stmtMatch[1], 64); err == nil {
-							d.Set("max_statement_time", maxStmt)
-						}
-					}
-				}
+				parseWithClauseSetting(d, withClause, "max_user_connections", "MAX_USER_CONNECTIONS", false)
+				parseWithClauseSetting(d, withClause, "max_statement_time", "MAX_STATEMENT_TIME", true)
 			}
 
 			return nil

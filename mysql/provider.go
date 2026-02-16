@@ -944,6 +944,15 @@ func serverRds(db *sql.DB) (bool, error) {
 	return false, nil
 }
 
+func serverMariaDB(db *sql.DB) (bool, error) {
+	versionString, err := serverVersionString(db)
+	if err != nil {
+		return false, err
+	}
+
+	return strings.Contains(versionString, "MariaDB"), nil
+}
+
 func connectToMySQL(ctx context.Context, conf *MySQLConfiguration) (*sql.DB, error) {
 	conn, err := connectToMySQLInternal(ctx, conf)
 	if err != nil {
