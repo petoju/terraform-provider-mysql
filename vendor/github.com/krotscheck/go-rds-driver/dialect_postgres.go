@@ -3,6 +3,7 @@ package rds
 import (
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata"
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata/types"
@@ -50,7 +51,6 @@ func (d *DialectPostgres) MigrateQuery(query string, args []driver.NamedValue) (
 				Value: v.Value,
 			}
 		}
-		args = namedArgs
 
 		query = postgresRegex.ReplaceAllStringFunc(query, func(s string) string {
 			return strings.Replace(s, "$", ":", 1)
@@ -123,4 +123,18 @@ func (d *DialectPostgres) IsIsolationLevelSupported(level driver.IsolationLevel)
 	}
 	_, ok := SupportedIsolationLevels[level]
 	return ok
+}
+
+// GetTransactionSetupQuery returns the query to set up the transaction.
+func (d *DialectPostgres) GetTransactionSetupQuery(opts driver.TxOptions) string {
+	var clause []string
+	if sql.IsolationLevel(opts.Isolation) != sql.LevelDefault {
+		clause = append(clause, fmt.Sprintf("ISOLATION LEVEL %s", sql.IsolationLevel(opts.Isolation).String()))
+	}
+	if opts.ReadOnly {
+		clause = append(clause, "READ ONLY")
+	} else {
+		clause = append(clause, "READ WRITE")
+	}
+	return fmt.Sprintf("SET TRANSACTION %s", strings.Join(clause, ", "))
 }

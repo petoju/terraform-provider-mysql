@@ -3,19 +3,20 @@ package rds
 import (
 	"database/sql/driver"
 	"fmt"
+	"io"
+
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata"
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata/types"
-	"io"
 )
 
 // Explicit compile time checks.
 var _ driver.Rows = (*Rows)(nil)
 var _ driver.RowsNextResultSet = (*Rows)(nil) // explicit compile time type check
-//var _ driver.RowsColumnTypeScanType = (*Rows)(nil)         // explicit compile time type check
-//var _ driver.RowsColumnTypeDatabaseTypeName = (*Rows)(nil) // explicit compile time type check
-//var _ driver.RowsColumnTypeLength = (*Rows)(nil)           // explicit compile time type check
-//var _ driver.RowsColumnTypeNullable = (*Rows)(nil)         // explicit compile time type check
-//var _ driver.RowsColumnTypePrecisionScale = (*Rows)(nil)   // explicit compile time type check
+// var _ driver.RowsColumnTypeScanType = (*Rows)(nil)         // explicit compile time type check
+// var _ driver.RowsColumnTypeDatabaseTypeName = (*Rows)(nil) // explicit compile time type check
+// var _ driver.RowsColumnTypeLength = (*Rows)(nil)           // explicit compile time type check
+// var _ driver.RowsColumnTypeNullable = (*Rows)(nil)         // explicit compile time type check
+// var _ driver.RowsColumnTypePrecisionScale = (*Rows)(nil)   // explicit compile time type check
 
 // NewRows instance for the provided statement output
 func NewRows(dialect Dialect, results []*rdsdata.ExecuteStatementOutput) driver.Rows {

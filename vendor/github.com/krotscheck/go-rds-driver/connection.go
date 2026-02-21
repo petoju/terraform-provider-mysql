@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata"
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata/types"
-	"strings"
 )
 
 var _ driver.Conn = (*Connection)(nil)               // explicit compile time type check
@@ -19,7 +20,7 @@ var _ driver.Pinger = (*Connection)(nil)             // explicit compile time ty
 var _ driver.QueryerContext = (*Connection)(nil)     // explicit compile time type check
 var _ driver.SessionResetter = (*Connection)(nil)    // explicit compile time type check
 var _ driver.Validator = (*Connection)(nil)          // explicit compile time type check
-//var _ driver.NamedValueChecker = (*Connection)(nil)  // explicit compile time type check
+// var _ driver.NamedValueChecker = (*Connection)(nil)  // explicit compile time type check
 
 // NewConnection that can make transaction and statement requests against RDS
 func NewConnection(ctx context.Context, rds AWSClientInterface, conf *Config, dialect Dialect) driver.Conn {
@@ -100,22 +101,10 @@ func (r *Connection) Begin() (driver.Tx, error) {
 
 // BeginTx starts and returns a new transaction.
 func (r *Connection) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	// Assume that the underlying database supports all isolation levels.
 	if !r.dialect.IsIsolationLevelSupported(opts.Isolation) {
 		return nil, fmt.Errorf("isolation level %d not supported", opts.Isolation)
 	}
-	var clause []string
-	if sql.IsolationLevel(opts.Isolation) != sql.LevelDefault {
-		clause = append(clause, fmt.Sprintf("ISOLATION LEVEL %s", sql.IsolationLevel(opts.Isolation).String()))
-	}
-	if opts.ReadOnly {
-		clause = append(clause, "READ ONLY")
-	} else {
-		clause = append(clause, "READ WRITE")
-	}
-	query := fmt.Sprintf("SET TRANSACTION %s", strings.Join(clause, ", "))
 
-	// Start the transaction
 	output, err := r.rds.BeginTransaction(ctx, &rdsdata.BeginTransactionInput{
 		Database:    aws.String(r.database),
 		ResourceArn: aws.String(r.resourceARN),
@@ -130,12 +119,16 @@ func (r *Connection) BeginTx(ctx context.Context, opts driver.TxOptions) (driver
 		conn:          r,
 	}
 
-	if _, err := r.ExecContext(ctx, query, nil); err != nil {
-		defer func() {
-			_ = r.tx.Rollback()
-		}()
-		return nil, err
+	query := r.dialect.GetTransactionSetupQuery(opts)
+	if query != "" {
+		if _, err := r.ExecContext(ctx, query, nil); err != nil {
+			defer func() {
+				_ = r.tx.Rollback()
+			}()
+			return nil, err
+		}
 	}
+
 	return r.tx, nil
 }
 

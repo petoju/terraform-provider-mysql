@@ -3,6 +3,7 @@ package rds
 import (
 	"context"
 	"database/sql/driver"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/rdsdata"
 )
@@ -10,7 +11,7 @@ import (
 var _ driver.Stmt = (*Statement)(nil)             // explicit compile time type check
 var _ driver.StmtExecContext = (*Statement)(nil)  // explicit compile time type check
 var _ driver.StmtQueryContext = (*Statement)(nil) // explicit compile time type check
-//var _ driver.NamedValueChecker = (*Statement)(nil) // explicit compile time type check
+// var _ driver.NamedValueChecker = (*Statement)(nil) // explicit compile time type check
 
 // NewStatement for the provided connection
 func NewStatement(_ context.Context, connection *Connection, sql []string) *Statement {
