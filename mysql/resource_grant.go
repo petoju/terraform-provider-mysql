@@ -1068,8 +1068,8 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 
 // unescapeRoleName reverses the escaping done by quoteRoleName in provider.go.
 // It handles backslash-escaping (from Terraform import double-escaping), doubled backticks
-// (for backtick-quoted identifiers), and doubled single quotes (for backward compatibility
-// with single-quoted strings).
+// (for backward compatibility with backtick-quoted identifiers), and doubled single quotes
+// (for single-quoted identifiers used in GRANT/CREATE ROLE statements).
 func unescapeRoleName(s string) string {
 	// Unescape doubled backslashes first (handles Terraform import double-escaping)
 	s = strings.ReplaceAll(s, "\\\\", "\\")

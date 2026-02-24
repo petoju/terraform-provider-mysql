@@ -16,8 +16,12 @@ import (
 )
 
 // formatUserIdentifier formats a user identifier with proper quoting for MySQL
+// It uses single quotes with doubled-quote escaping (e.g., 'user'@'host') for better
+// compatibility across MySQL/MariaDB versions and to support @ in usernames (GCP IAM).
 func formatUserIdentifier(user, host string) string {
-	return fmt.Sprintf("%s@%s", quoteIdentifier(user), quoteIdentifier(host))
+	escapedUser := strings.ReplaceAll(user, "'", "''")
+	escapedHost := strings.ReplaceAll(host, "'", "''")
+	return fmt.Sprintf("'%s'@'%s'", escapedUser, escapedHost)
 }
 
 // quoteString escapes and quotes a string literal for MySQL
