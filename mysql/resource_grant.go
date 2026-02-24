@@ -70,10 +70,13 @@ func (u UserOrRole) IDString() string {
 }
 
 func (u UserOrRole) SQLString() string {
+	// Escape single quotes by doubling them (MySQL standard)
+	escapedName := strings.ReplaceAll(u.Name, "'", "''")
 	if u.Host == "" {
-		return fmt.Sprintf("'%s'", u.Name)
+		return fmt.Sprintf("'%s'", escapedName)
 	}
-	return fmt.Sprintf("'%s'@'%s'", u.Name, u.Host)
+	escapedHost := strings.ReplaceAll(u.Host, "'", "''")
+	return fmt.Sprintf("'%s'@'%s'", escapedName, escapedHost)
 }
 
 func (u UserOrRole) Equals(other UserOrRole) bool {
@@ -675,24 +678,63 @@ func isNonExistingGrant(err error) bool {
 }
 
 func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	userHostDatabaseTable := strings.Split(strings.TrimSuffix(d.Id(), ";r"), "@")
+	idWithoutSuffix := strings.TrimSuffix(d.Id(), ";r")
+	userHostDatabaseTable := strings.Split(idWithoutSuffix, "@")
 
-	if len(userHostDatabaseTable) != 4 && len(userHostDatabaseTable) != 5 {
+	// Expected formats:
+	// - user@host@database@table (4 parts) - no grant option
+	// - user@host@database@table@ (5 parts with empty last element) - with grant option
+	// - user@host@database@table;r (4 parts + ;r suffix) - role grant without grant option
+	// - user@host@database@table@;r (5 parts with empty last element + ;r suffix) - role grant with grant option
+	// If the username contains @ (e.g., user@domain.com), there will be more parts than expected.
+	// Join the extra parts at the beginning to reconstruct the username.
+	// For example: user@domain.com@host@database@table -> parts = ["user", "domain.com", "host", "database", "table"]
+
+	isRoleGrant := strings.HasSuffix(d.Id(), ";r")
+
+	// Check if the ID ends with @ (before ;r), which indicates grant option
+	// The trailing @ creates an empty string element when splitting
+	hasTrailingAt := len(userHostDatabaseTable) > 0 && userHostDatabaseTable[len(userHostDatabaseTable)-1] == ""
+	grantOption := hasTrailingAt
+
+	// Expected number of parts for standard format (without considering embedded @ in username)
+	// If grant option is present, we have 5 elements (with empty last one)
+	baseExpectedParts := 4 // user@host@database@table (without grant option)
+
+	var user, host, database, table string
+
+	if len(userHostDatabaseTable) > baseExpectedParts+1 {
+		// Username contains @ - need to reconstruct it
+		// The extra parts beyond baseExpectedParts belong to the username
+		// If grant option is present, there's an extra empty element at the end, so we subtract 1
+		extraParts := len(userHostDatabaseTable) - baseExpectedParts
+		if hasTrailingAt {
+			extraParts--
+		}
+
+		// The first extraParts+1 elements form the username (all but the last 3 parts which are host, database, table)
+		numUserParts := extraParts + 1
+		user = strings.Join(userHostDatabaseTable[:numUserParts], "@")
+		host = userHostDatabaseTable[numUserParts]
+		database = userHostDatabaseTable[numUserParts+1]
+		table = userHostDatabaseTable[numUserParts+2]
+	} else if len(userHostDatabaseTable) == baseExpectedParts || len(userHostDatabaseTable) == baseExpectedParts+1 {
+		// Standard case - no embedded @ in username
+		user = userHostDatabaseTable[0]
+		host = userHostDatabaseTable[1]
+		database = userHostDatabaseTable[2]
+		table = userHostDatabaseTable[3]
+	} else {
 		return nil, fmt.Errorf("wrong ID format %s - expected user@host@database@table (and optionally ending @ to signify grant option) where some parts can be empty)", d.Id())
 	}
 
-	user := userHostDatabaseTable[0]
-	host := userHostDatabaseTable[1]
-	database := userHostDatabaseTable[2]
-	table := userHostDatabaseTable[3]
-	grantOption := len(userHostDatabaseTable) == 5
 	userOrRole := UserOrRole{
 		Name: user,
 		Host: host,
 	}
 
 	var desiredGrant MySQLGrant
-	if strings.HasSuffix(d.Id(), ";r") {
+	if isRoleGrant {
 		desiredGrant = &RoleGrant{
 			UserOrRole: userOrRole,
 			Grant:      grantOption,
@@ -732,7 +774,7 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		}
 	}
 
-	return nil, fmt.Errorf("failed to find the grant to import: %v -- found %#v", userHostDatabaseTable, grants)
+	return nil, fmt.Errorf("failed to find the grant to import: user=%s host=%s database=%s table=%s -- found %#v", user, host, database, table, grants)
 }
 
 // setDataFromGrant copies the values from MySQLGrant to the schema.ResourceData
@@ -857,26 +899,42 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) 
 var (
 	// kUserOrRoleRegex matches user/role names with proper handling of backslash escape sequences
 	// and doubled single quotes (SQL standard escaping for single quotes in identifiers).
-	// Pattern handles: unquoted names, single-quoted names, double-quoted names, and backtick-quoted names
-	// For quoted names, it properly captures backslash-escaped characters (e.g., \' or \\) and doubled single quotes ('')
-	kUserOrRoleRegex = regexp.MustCompile("['`]?((?:[^'`\"\\\\@]|\\\\.|'')*)['`]?(?:@['\"]?((?:[^'`\"\\\\]|\\\\.|'')*)['\"]?)?")
+	// Pattern handles: unquoted names, single-quoted names, and backtick-quoted names.
+	// For quoted names, it properly captures backslash-escaped characters (e.g., \' or \\) and doubled single quotes ('').
+	// Importantly, @ is allowed inside quoted usernames to support GCP IAM email addresses like 'user@example.com'@'%'.
+	// Group 1: username (quoted or unquoted)
+	// Group 2: host (quoted or unquoted, optional)
+	kUserOrRoleRegex = regexp.MustCompile("^((?:'(?:[^'\\\\]|\\\\.|'')*'|`(?:[^`\\\\]|\\\\.|``)*`|(?:[^'\"`@\\\\]|\\\\.)+))(?:@((?:'(?:[^'\\\\]|\\\\.|'')*'|`(?:[^`\\\\]|\\\\.|``)*`|(?:[^'\"`\\\\]|\\\\.)+)))?$")
 )
+
+// stripQuotes removes outer matching quotes (single quotes or backticks) from a string
+func stripQuotes(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '`' && s[len(s)-1] == '`') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
 
 func parseUserOrRoleFromRow(userOrRoleStr string) (*UserOrRole, error) {
 	userHostMatches := kUserOrRoleRegex.FindStringSubmatch(userOrRoleStr)
-	if len(userHostMatches) == 3 {
+	// Group structure with the new regex:
+	// [0] full match, [1] username (may include quotes), [2] host (may include quotes, optional)
+	if len(userHostMatches) >= 2 && userHostMatches[1] != "" {
+		// Strip outer quotes and unescape
+		name := unescapeRoleName(stripQuotes(userHostMatches[1]))
+		host := "%"
+		// Has host (group 2)
+		if len(userHostMatches) >= 3 && userHostMatches[2] != "" {
+			host = unescapeRoleName(stripQuotes(userHostMatches[2]))
+		}
 		return &UserOrRole{
-			Name: unescapeRoleName(userHostMatches[1]),
-			Host: unescapeRoleName(userHostMatches[2]),
+			Name: name,
+			Host: host,
 		}, nil
-	} else if len(userHostMatches) == 2 {
-		return &UserOrRole{
-			Name: unescapeRoleName(userHostMatches[1]),
-			Host: "%",
-		}, nil
-	} else {
-		return nil, fmt.Errorf("failed to parse user or role portion of grant statement: %s", userOrRoleStr)
 	}
+	return nil, fmt.Errorf("failed to parse user or role portion of grant statement: %s", userOrRoleStr)
 }
 
 var (
@@ -1024,6 +1082,25 @@ func unescapeRoleName(s string) string {
 
 func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {
 	grants := []MySQLGrant{}
+
+	// Check if this is a cloudiamgroup user on GCP CloudSQL (version ends with "-google")
+	// GCP CloudSQL uses cloudiamgroup as a placeholder role, but SHOW GRANTS returns an error
+	// We only fetch the server version if needed (when user is cloudiamgroup)
+	isGCPCloudSQL := false
+	if userOrRole.Name == "cloudiamgroup" {
+		serverVersion, err := serverVersionString(db)
+		if err != nil {
+			log.Printf("[WARN] Failed to get server version for cloudiamgroup check: %v", err)
+		} else {
+			isGCPCloudSQL = strings.HasSuffix(serverVersion, "-google")
+		}
+	}
+
+	// On GCP CloudSQL, cloudiamgroup grants are not real and should be ignored
+	if isGCPCloudSQL {
+		log.Printf("[DEBUG] Detected GCP CloudSQL (version ends with -google), skipping cloudiamgroup grants")
+		return grants, nil
+	}
 
 	sqlStatement := fmt.Sprintf("SHOW GRANTS FOR %s", userOrRole.SQLString())
 	log.Printf("[DEBUG] SQL to show grants: %s", sqlStatement)
