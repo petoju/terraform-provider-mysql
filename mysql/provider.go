@@ -895,7 +895,7 @@ func quoteIdentifier(in string) string {
 // It escapes backticks by doubling them (e.g., `name“with`backtick“ becomes `name“with“backtick“).
 // Backtick quoting is preferred over single quotes because backslashes don't need escaping.
 func quoteRoleName(s string) string {
-	return fmt.Sprintf("'%s'", strings.ReplaceAll(s, "'", "''"))
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(s, "`", "``"))
 }
 
 func serverVersion(db *sql.DB) (*version.Version, error) {

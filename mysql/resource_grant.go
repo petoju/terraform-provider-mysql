@@ -70,11 +70,13 @@ func (u UserOrRole) IDString() string {
 }
 
 func (u UserOrRole) SQLString() string {
-	// Escape single quotes by doubling them (MySQL standard)
-	escapedName := strings.ReplaceAll(u.Name, "'", "''")
+	// If Host is empty, it's a role - use backticks with doubled-backtick escaping
+	// If Host is not empty, it's a user - use single quotes with doubled-quote escaping
 	if u.Host == "" {
-		return fmt.Sprintf("'%s'", escapedName)
+		escapedName := strings.ReplaceAll(u.Name, "`", "``")
+		return fmt.Sprintf("`%s`", escapedName)
 	}
+	escapedName := strings.ReplaceAll(u.Name, "'", "''")
 	escapedHost := strings.ReplaceAll(u.Host, "'", "''")
 	return fmt.Sprintf("'%s'@'%s'", escapedName, escapedHost)
 }
