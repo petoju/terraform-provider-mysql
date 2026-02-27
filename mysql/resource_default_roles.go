@@ -60,10 +60,15 @@ func checkDefaultRolesSupport(ctx context.Context, meta interface{}) error {
 func alterUserDefaultRoles(ctx context.Context, db *sql.DB, user, host string, roles []string) error {
 	var stmtSQL string
 
-	stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' DEFAULT ROLE ", user, host)
+	// Use formatUserIdentifier for consistent quoting (backtick + escaping)
+	stmtSQL = fmt.Sprintf("ALTER USER %s DEFAULT ROLE ", formatUserIdentifier(user, host))
 
 	if len(roles) > 0 {
-		stmtSQL += fmt.Sprintf("'%s'", strings.Join(roles, "', '"))
+		quotedRoles := make([]string, len(roles))
+		for i, role := range roles {
+			quotedRoles[i] = quoteRoleName(role)
+		}
+		stmtSQL += fmt.Sprintf("%s", strings.Join(quotedRoles, ", "))
 	} else {
 		stmtSQL += "NONE"
 	}
@@ -191,14 +196,13 @@ func DeleteDefaultRoles(ctx context.Context, d *schema.ResourceData, meta interf
 }
 
 func ImportDefaultRoles(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	userHost := strings.SplitN(d.Id(), "@", 2)
-
-	if len(userHost) != 2 {
-		return nil, fmt.Errorf("wrong ID format %s (expected USER@HOST)", d.Id())
+	user, host, err := parseUserHost(d.Id())
+	if err != nil {
+		return nil, err
 	}
 
-	d.Set("user", userHost[0])
-	d.Set("host", userHost[1])
+	d.Set("user", user)
+	d.Set("host", host)
 
 	readDiags := ReadDefaultRoles(ctx, d, meta)
 	for _, readDiag := range readDiags {

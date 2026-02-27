@@ -45,14 +45,15 @@ import (
 )
 
 const (
-	cleartextPasswords  = "cleartext"
-	nativePasswords     = "native"
-	userNotFoundErrCode = 1133
-	unknownUserErrCode  = 1396
-	azEnvPublic         = "public"
-	azEnvChina          = "china"
-	azEnvGerman         = "german"
-	azEnvUSGovernment   = "usgovernment"
+	cleartextPasswords      = "cleartext"
+	nativePasswords         = "native"
+	userNotFoundErrCode     = 1133
+	unknownUserErrCode      = 1396
+	nonExistingGrantErrCode = 1141
+	azEnvPublic             = "public"
+	azEnvChina              = "china"
+	azEnvGerman             = "german"
+	azEnvUSGovernment       = "usgovernment"
 )
 
 type OneConnection struct {
@@ -888,6 +889,13 @@ func makeDialer(d *schema.ResourceData) (proxy.Dialer, error) {
 
 func quoteIdentifier(in string) string {
 	return fmt.Sprintf("`%s`", identQuoteReplacer.Replace(in))
+}
+
+// quoteRoleName safely quotes role names with backticks and proper escaping.
+// It escapes backticks by doubling them (e.g., `name“with`backtick“ becomes `name“with“backtick“).
+// Backtick quoting is preferred over single quotes because backslashes don't need escaping.
+func quoteRoleName(s string) string {
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(s, "`", "``"))
 }
 
 func serverVersion(db *sql.DB) (*version.Version, error) {

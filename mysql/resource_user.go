@@ -17,8 +17,12 @@ import (
 )
 
 // formatUserIdentifier formats a user identifier with proper quoting for MySQL
+// It uses single quotes with doubled-quote escaping (e.g., 'user'@'host') for better
+// compatibility across MySQL/MariaDB versions and to support @ in usernames (GCP IAM).
 func formatUserIdentifier(user, host string) string {
-	return fmt.Sprintf("%s@%s", quoteIdentifier(user), quoteIdentifier(host))
+	escapedUser := strings.ReplaceAll(user, "'", "''")
+	escapedHost := strings.ReplaceAll(host, "'", "''")
+	return fmt.Sprintf("'%s'@'%s'", escapedUser, escapedHost)
 }
 
 // quoteString escapes and quotes a string literal for MySQL
@@ -835,21 +839,39 @@ func DeleteUser(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	return diag.FromErr(err)
 }
 
-func ImportUser(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	userHost := strings.SplitN(d.Id(), "@", 2)
-
-	if len(userHost) != 2 {
-		return nil, fmt.Errorf("wrong ID format %s (expected USER@HOST)", d.Id())
+// parseUserHost parses a user@host string, handling usernames that contain @
+// (like GCP IAM email addresses). It uses the last @ as the separator.
+func parseUserHost(id string) (user, host string, err error) {
+	// Find the last @ to handle usernames containing @ (like GCP IAM emails)
+	lastAt := strings.LastIndex(id, "@")
+	if lastAt == -1 {
+		// No @ found - use default host
+		return id, "localhost", nil
+	}
+	if lastAt == 0 {
+		return "", "", fmt.Errorf("wrong ID format %s (user cannot start with @)", id)
 	}
 
-	user := userHost[0]
-	host := userHost[1]
+	user = id[:lastAt]
+	host = id[lastAt+1:]
+	if host == "" {
+		host = "localhost"
+	}
+	return user, host, nil
+}
+
+func ImportUser(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+	user, host, err := parseUserHost(d.Id())
+	if err != nil {
+		return nil, err
+	}
+
 	d.Set("user", user)
 	d.Set("host", host)
-	err := ReadUser(ctx, d, meta)
+	diags := ReadUser(ctx, d, meta)
 	var ferror error
-	if err.HasError() {
-		ferror = fmt.Errorf("failed reading user: %v", err)
+	if diags.HasError() {
+		ferror = fmt.Errorf("failed reading user: %v", diags)
 	}
 
 	return []*schema.ResourceData{d}, ferror

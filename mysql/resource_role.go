@@ -14,6 +14,9 @@ func resourceRole() *schema.Resource {
 		CreateContext: CreateRole,
 		ReadContext:   ReadRole,
 		DeleteContext: DeleteRole,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -32,8 +35,9 @@ func CreateRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	}
 
 	roleName := d.Get("name").(string)
+	log.Printf("[DEBUG] CreateRole: roleName=%q, escaped=%q", roleName, quoteRoleName(roleName))
 
-	sql := fmt.Sprintf("CREATE ROLE '%s'", roleName)
+	sql := fmt.Sprintf("CREATE ROLE %s", quoteRoleName(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
@@ -52,17 +56,29 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR '%s'", d.Id())
+	roleName := unescapeRoleName(d.Id())
+	log.Printf("[DEBUG] ReadRole: d.Id()=%q, unescaped=%q, escaped=%q", d.Id(), roleName, quoteRoleName(roleName))
+	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteRoleName(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
-	_, err = db.ExecContext(ctx, sql)
+	rows, err := db.QueryContext(ctx, sql)
 	if err != nil {
-		log.Printf("[WARN] Role (%s) not found; removing from state", d.Id())
+		errorNumber := mysqlErrorNumber(err)
+		if errorNumber == unknownUserErrCode || errorNumber == userNotFoundErrCode || errorNumber == nonExistingGrantErrCode {
+			d.SetId("")
+			return nil
+		}
+		return diag.Errorf("error reading role: %s", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
 		d.SetId("")
 		return nil
 	}
 
-	d.Set("name", d.Id())
+	d.SetId(roleName)
+	d.Set("name", roleName)
 
 	return nil
 }
@@ -73,7 +89,7 @@ func DeleteRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("DROP ROLE '%s'", d.Get("name").(string))
+	sql := fmt.Sprintf("DROP ROLE %s", quoteRoleName(d.Get("name").(string)))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
