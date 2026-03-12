@@ -7,6 +7,7 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -986,6 +987,11 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {
 	grants := []MySQLGrant{}
 
+	version, err := serverVersionString(db)
+	if err != nil {
+		return nil, fmt.Errorf("showUserGrants - getting server version failed: %w", err)
+	}
+
 	sqlStatement := fmt.Sprintf("SHOW GRANTS FOR %s", userOrRole.SQLString())
 	log.Printf("[DEBUG] SQL to show grants: %s", sqlStatement)
 	rows, err := db.QueryContext(ctx, sqlStatement)
@@ -996,11 +1002,6 @@ func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]M
 
 	if err != nil {
 		return nil, fmt.Errorf("showUserGrants - getting grants failed: %w", err)
-	}
-
-	ver, err := serverVersionString(db)
-	if err != nil {
-		return nil, fmt.Errorf("showUserGrants - getting server version failed: %w", err)
 	}
 
 	defer rows.Close()
@@ -1020,15 +1021,25 @@ func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]M
 			continue
 		}
 
-		if strings.HasSuffix(ver, "-google") {
-			ignored := UserOrRole{
-				Name: "cloudiamgroup",
-			}
-			if parsedGrant.GetUserOrRole().Equals(ignored) {
+		if strings.HasSuffix(version, "-google") {
+			if roleGrant, ok := parsedGrant.(*RoleGrant); ok {
+				roles := roleGrant.GetRoles()
+				log.Printf("[DEBUG] Role names: %v", roles)
+
 				// we can't handle cloudiamgroup on GCP cloudsql
 				// see: https://github.com/petoju/terraform-provider-mysql/issues/254
-				log.Printf("[DEBUG] Skipping grant cloudiamgroup on CloudSQL")
-				continue
+				if len(roles) == 1 && slices.Contains(roles, "cloudiamgroup") {
+					log.Printf("[DEBUG] Skipping grant cloudiamgroup on CloudSQL")
+					continue
+				} else if len(roles) >= 1 && slices.Contains(roles, "cloudiamgroup") {
+					log.Printf("[DEBUG] Removing grant cloudiamgroup on CloudSQL from parsed grant")
+					i := slices.Index(roles, "cloudiamgroup")
+					if i != -1 {
+						roleGrant.Roles = slices.Delete(roles, i, i+1)
+					}
+				}
+			} else {
+				log.Printf("[DEBUG] parsedGrant is not a *RoleGrant, it is %T", parsedGrant)
 			}
 		}
 
