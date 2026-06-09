@@ -55,7 +55,7 @@ const (
 	azEnvUSGovernment   = "usgovernment"
 )
 
-type OneConnection struct {
+type DbConnection struct {
 	Db      *sql.DB
 	Version *version.Version
 }
@@ -81,14 +81,14 @@ type CustomTLS struct {
 
 var (
 	connectionCacheMtx sync.Mutex
-	connectionCache    map[string]*OneConnection
+	connectionCache    map[string]*DbConnection
 )
 
 func init() {
 	connectionCacheMtx.Lock()
 	defer connectionCacheMtx.Unlock()
 
-	connectionCache = map[string]*OneConnection{}
+	connectionCache = map[string]*DbConnection{}
 }
 
 func Provider() *schema.Provider {
@@ -184,6 +184,7 @@ func Provider() *schema.Provider {
 			"max_open_conns": {
 				Type:     schema.TypeInt,
 				Optional: true,
+				Default:  1,
 			},
 
 			"conn_params": {
@@ -677,34 +678,6 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	return mysqlConf, nil
 }
 
-func afterConnectVersion(ctx context.Context, mysqlConf *MySQLConfiguration, db *sql.DB) (*version.Version, error) {
-	// Set up env so that we won't create users randomly.
-	currentVersion, err := serverVersion(db)
-	if err != nil {
-		return nil, fmt.Errorf("failed getting server version: %v", err)
-	}
-
-	versionMinInclusive, _ := version.NewVersion("5.7.5")
-	versionMaxExclusive, _ := version.NewVersion("8.0.0")
-	if currentVersion.GreaterThanOrEqual(versionMinInclusive) &&
-		currentVersion.LessThan(versionMaxExclusive) {
-		// We set NO_AUTO_CREATE_USER to prevent provider from creating user when creating grants. Newer MySQL has it automatically.
-		// We don't want any other modes, esp. not ANSI_QUOTES.
-		_, err = db.ExecContext(ctx, `SET SESSION sql_mode='NO_AUTO_CREATE_USER'`)
-		if err != nil {
-			return nil, fmt.Errorf("failed setting SQL mode: %v", err)
-		}
-	} else {
-		// We don't want any modes, esp. not ANSI_QUOTES.
-		_, err = db.ExecContext(ctx, `SET SESSION sql_mode=''`)
-		if err != nil {
-			return nil, fmt.Errorf("failed setting SQL mode: %v", err)
-		}
-	}
-
-	return currentVersion, nil
-}
-
 var identQuoteReplacer = strings.NewReplacer("`", "``")
 
 // httpProxyDialer implements the proxy.Dialer interface for HTTP proxies
@@ -961,7 +934,7 @@ func connectToMySQL(ctx context.Context, conf *MySQLConfiguration) (*sql.DB, err
 	return conn.Db, nil
 }
 
-func connectToMySQLInternal(ctx context.Context, conf *MySQLConfiguration) (*OneConnection, error) {
+func connectToMySQLInternal(ctx context.Context, conf *MySQLConfiguration) (*DbConnection, error) {
 	// This is fine - we'll connect serially, but we don't expect more than
 	// 1 or 2 connections starting at once.
 	connectionCacheMtx.Lock()
@@ -982,7 +955,7 @@ func connectToMySQLInternal(ctx context.Context, conf *MySQLConfiguration) (*One
 	return connectionCache[dsn], nil
 }
 
-func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*OneConnection, error) {
+func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*DbConnection, error) {
 	var db *sql.DB
 	var err error
 
@@ -1020,19 +993,44 @@ func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*OneCon
 	if retryError != nil {
 		return nil, fmt.Errorf("could not connect to server: %s", retryError)
 	}
-	db.SetConnMaxLifetime(conf.MaxConnLifetime)
 
-	// We used to set conf.MaxOpenConns, but then some connections are open outside our control
-	// and without our settings like no ANSI_QUOTES.
-	// TODO: find a way to support more open connections while able to set custom settings for each of them.
-	db.SetMaxOpenConns(1)
-
-	currentVersion, err := afterConnectVersion(ctx, conf, db)
+	currentVersion, err := serverVersion(db)
 	if err != nil {
-		return nil, fmt.Errorf("failed running after connect command: %v", err)
+		return nil, fmt.Errorf("failed getting server version: %v", err)
 	}
 
-	return &OneConnection{
+	// Close the temporary connection - we'll create a proper pooled one
+	db.Close()
+
+	if conf.Config.Params == nil {
+		conf.Config.Params = make(map[string]string)
+	}
+
+	versionMinInclusive, _ := version.NewVersion("5.7.5")
+	versionMaxExclusive, _ := version.NewVersion("8.0.0")
+	if currentVersion.GreaterThanOrEqual(versionMinInclusive) &&
+		currentVersion.LessThan(versionMaxExclusive) {
+		conf.Config.Params["sql_mode"] = "'NO_AUTO_CREATE_USER'"
+	} else {
+		conf.Config.Params["sql_mode"] = "''"
+	}
+
+	db, err = sql.Open(driverName, conf.Config.FormatDSN())
+	if err != nil {
+		return nil, fmt.Errorf("could not open database: %v", err)
+	}
+
+	db.SetConnMaxLifetime(conf.MaxConnLifetime)
+
+	// Enable connection pooling with configured max connections
+	if conf.MaxOpenConns > 0 {
+		db.SetMaxOpenConns(conf.MaxOpenConns)
+	} else {
+		// Default to behave as before.
+		db.SetMaxOpenConns(1)
+	}
+
+	return &DbConnection{
 		Db:      db,
 		Version: currentVersion,
 	}, nil
