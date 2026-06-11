@@ -1006,32 +1006,43 @@ func createNewConnection(ctx context.Context, conf *MySQLConfiguration) (*DbConn
 		conf.Config.Params = make(map[string]string)
 	}
 
-	versionMinInclusive, _ := version.NewVersion("5.7.5")
-	versionMaxExclusive, _ := version.NewVersion("8.0.0")
-	if currentVersion.GreaterThanOrEqual(versionMinInclusive) &&
-		currentVersion.LessThan(versionMaxExclusive) {
-		conf.Config.Params["sql_mode"] = "'NO_AUTO_CREATE_USER'"
-	} else {
-		conf.Config.Params["sql_mode"] = "''"
-	}
+	setSQLModeParam(conf.Config.Params, currentVersion)
 
 	db, err = sql.Open(driverName, conf.Config.FormatDSN())
 	if err != nil {
 		return nil, fmt.Errorf("could not open database: %v", err)
 	}
 
-	db.SetConnMaxLifetime(conf.MaxConnLifetime)
-
-	// Enable connection pooling with configured max connections
-	if conf.MaxOpenConns > 0 {
-		db.SetMaxOpenConns(conf.MaxOpenConns)
-	} else {
-		// Default to behave as before.
-		db.SetMaxOpenConns(1)
-	}
+	configureConnectionPool(db, conf.MaxConnLifetime, conf.MaxOpenConns)
 
 	return &DbConnection{
 		Db:      db,
 		Version: currentVersion,
 	}, nil
+}
+
+// setSQLModeParam sets the sql_mode connection parameter based on the MySQL server version.
+// For MySQL >= 5.7.5 and < 8.0.0, NO_AUTO_CREATE_USER is set to prevent implicit user
+// creation on GRANT. For all other versions, sql_mode is set to empty to avoid ANSI_QUOTES.
+func setSQLModeParam(params map[string]string, currentVersion *version.Version) {
+	versionMinInclusive, _ := version.NewVersion("5.7.5")
+	versionMaxExclusive, _ := version.NewVersion("8.0.0")
+	if currentVersion.GreaterThanOrEqual(versionMinInclusive) &&
+		currentVersion.LessThan(versionMaxExclusive) {
+		params["sql_mode"] = "'NO_AUTO_CREATE_USER'"
+	} else {
+		params["sql_mode"] = "''"
+	}
+}
+
+// configureConnectionPool sets connection pool parameters on the database handle.
+// If maxOpenConns is > 0, it uses the configured value; otherwise it defaults to 1
+// to maintain backward-compatible behavior (single connection with controlled settings).
+func configureConnectionPool(db *sql.DB, maxConnLifetime time.Duration, maxOpenConns int) {
+	db.SetConnMaxLifetime(maxConnLifetime)
+	if maxOpenConns > 0 {
+		db.SetMaxOpenConns(maxOpenConns)
+	} else {
+		db.SetMaxOpenConns(1)
+	}
 }
