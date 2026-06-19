@@ -58,18 +58,27 @@ func checkDefaultRolesSupport(ctx context.Context, meta interface{}) error {
 }
 
 func alterUserDefaultRoles(ctx context.Context, db *sql.DB, user, host string, roles []string) error {
-	var stmtSQL string
+	isMariaDB, err := serverMariaDB(db)
+	if err != nil {
+		return err
+	}
 
-	stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' DEFAULT ROLE ", user, host)
-
+	var rolesFragment string
 	if len(roles) > 0 {
-		stmtSQL += fmt.Sprintf("'%s'", strings.Join(roles, "', '"))
+		rolesFragment = fmt.Sprintf("'%s'", strings.Join(roles, "', '"))
 	} else {
-		stmtSQL += "NONE"
+		rolesFragment = "NONE"
+	}
+
+	var stmtSQL string
+	if isMariaDB {
+		stmtSQL = fmt.Sprintf("SET DEFAULT ROLE %s FOR '%s'@'%s'", rolesFragment, user, host)
+	} else {
+		stmtSQL = fmt.Sprintf("ALTER USER '%s'@'%s' DEFAULT ROLE %s", user, host, rolesFragment)
 	}
 
 	log.Println("[DEBUG] Executing statement:", stmtSQL)
-	_, err := db.ExecContext(ctx, stmtSQL)
+	_, err = db.ExecContext(ctx, stmtSQL)
 	if err != nil {
 		return fmt.Errorf("failed executing SQL: %w", err)
 	}
@@ -140,7 +149,15 @@ func ReadDefaultRoles(ctx context.Context, d *schema.ResourceData, meta interfac
 		return diag.Errorf("cannot use default roles: %v", err)
 	}
 
+	isMariaDB, err := serverMariaDB(db)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
 	stmtSQL := "SELECT default_role_user FROM mysql.default_roles WHERE user = ? AND host = ?"
+	if isMariaDB {
+		stmtSQL = "SELECT default_role FROM mysql.user WHERE user = ? AND host = ?"
+	}
 
 	log.Println("[DEBUG] Executing statement:", stmtSQL)
 
@@ -157,7 +174,9 @@ func ReadDefaultRoles(ctx context.Context, d *schema.ResourceData, meta interfac
 		if err != nil {
 			return diag.Errorf("failed scanning default roles: %v", err)
 		}
-		defaultRoles = append(defaultRoles, role)
+		if role != "" {
+			defaultRoles = append(defaultRoles, role)
+		}
 	}
 
 	if rows.Err() != nil {
