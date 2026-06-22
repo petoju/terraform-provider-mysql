@@ -63,6 +63,10 @@ func alterUserDefaultRoles(ctx context.Context, db *sql.DB, user, host string, r
 		return err
 	}
 
+	if isMariaDB && len(roles) > 1 {
+		return fmt.Errorf("MariaDB supports at most one default role per user, got %d", len(roles))
+	}
+
 	var rolesFragment string
 	if len(roles) > 0 {
 		rolesFragment = fmt.Sprintf("'%s'", strings.Join(roles, "', '"))

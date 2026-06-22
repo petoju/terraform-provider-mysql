@@ -890,6 +890,13 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 		return nil, nil
 	}
 
+	// Ignore SET DEFAULT ROLE. MariaDB reports the user's default role as a
+	// "SET DEFAULT ROLE ... FOR ..." line in SHOW GRANTS output; it is managed
+	// by the mysql_default_roles resource, not mysql_grant.
+	if strings.HasPrefix(grantStr, "SET DEFAULT ROLE") {
+		return nil, nil
+	}
+
 	// Parse Require Statement
 	tlsOption := "NONE"
 	if requireMatches := kRequireRegex.FindStringSubmatch(grantStr); len(requireMatches) == 2 {
