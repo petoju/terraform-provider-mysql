@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -15,7 +16,6 @@ func TestAccDefaultRoles_basic(t *testing.T) {
 		PreCheck: func() {
 			testAccPreCheck(t)
 			testAccPreCheckSkipNotMySQL8(t)
-			testAccPreCheckSkipMariaDB(t)
 			testAccPreCheckSkipTiDB(t)
 		},
 		ProviderFactories: testAccProviderFactories,
@@ -30,7 +30,9 @@ func TestAccDefaultRoles_basic(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccDefaultRolesMultiple,
+				// MariaDB allows only a single default role per user.
+				SkipFunc: skipIfMariaDB,
+				Config:   testAccDefaultRolesMultiple,
 				Check: resource.ComposeTestCheckFunc(
 					testAccDefaultRoles("mysql_default_roles.test", "role1", "role2"),
 					resource.TestCheckResourceAttr("mysql_default_roles.test", "roles.#", "2"),
@@ -53,6 +55,7 @@ func TestAccDefaultRoles_basic(t *testing.T) {
 				ImportStateId:     fmt.Sprintf("%v@%v", "jdoe", "%"),
 			},
 			{
+				SkipFunc:          skipIfMariaDB,
 				Config:            testAccDefaultRolesMultiple,
 				ResourceName:      "mysql_default_roles.test",
 				ImportState:       true,
@@ -61,6 +64,36 @@ func TestAccDefaultRoles_basic(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestAccDefaultRoles_mariadbRejectsMultiple checks MariaDB rejects more than one default role.
+func TestAccDefaultRoles_mariadbRejectsMultiple(t *testing.T) {
+	testAccPreCheckRequireMariaDB(t)
+
+	ctx := context.Background()
+	db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+	if err != nil {
+		t.Fatalf("cannot connect to DB: %v", err)
+	}
+
+	err = alterUserDefaultRoles(ctx, db, "jdoe", "%", []string{"role1", "role2"})
+	if err == nil {
+		t.Fatal("expected error when setting multiple default roles on MariaDB, got nil")
+	}
+	if !strings.Contains(err.Error(), "MariaDB supports at most one default role") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// skipIfMariaDB reports whether the server is MariaDB, to skip MySQL-only steps.
+func skipIfMariaDB() (bool, error) {
+	ctx := context.Background()
+	db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+	if err != nil {
+		return false, err
+	}
+
+	return serverMariaDB(db)
 }
 
 func testAccDefaultRoles(rn string, roles ...string) resource.TestCheckFunc {
@@ -80,7 +113,15 @@ func testAccDefaultRoles(rn string, roles ...string) resource.TestCheckFunc {
 			return err
 		}
 
+		isMariaDB, err := serverMariaDB(db)
+		if err != nil {
+			return err
+		}
+
 		stmtSQL := fmt.Sprintf("SELECT default_role_user from mysql.default_roles where CONCAT(user, '@', host) = '%s'", rs.Primary.ID)
+		if isMariaDB {
+			stmtSQL = fmt.Sprintf("SELECT default_role from mysql.user where CONCAT(user, '@', host) = '%s' and default_role != ''", rs.Primary.ID)
+		}
 		log.Println("[DEBUG] Executing statement:", stmtSQL)
 		rows, err := db.Query(stmtSQL)
 		if err != nil {
@@ -124,12 +165,20 @@ func testAccDefaultRolesCheckDestroy(s *terraform.State) error {
 		return err
 	}
 
+	isMariaDB, err := serverMariaDB(db)
+	if err != nil {
+		return err
+	}
+
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "mysql_default_roles" {
 			continue
 		}
 
 		stmtSQL := fmt.Sprintf("SELECT count(*) FROM mysql.default_roles WHERE CONCAT(user, '@', host) = '%s'", rs.Primary.ID)
+		if isMariaDB {
+			stmtSQL = fmt.Sprintf("SELECT count(*) FROM mysql.user WHERE CONCAT(user, '@', host) = '%s' AND default_role != ''", rs.Primary.ID)
+		}
 		log.Println("[DEBUG] Executing statement:", stmtSQL)
 		var count int
 		err := db.QueryRow(stmtSQL).Scan(&count)
