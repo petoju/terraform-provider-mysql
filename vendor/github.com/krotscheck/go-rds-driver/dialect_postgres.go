@@ -91,20 +91,41 @@ func (d *DialectPostgres) GetFieldConverter(columnType string) FieldConverter {
 		return func(field types.Field) (interface{}, error) {
 			timeStringVal := field.(*types.FieldMemberStringValue).Value
 			if d.parseTime {
-				return time.Parse("15:04:05", timeStringVal)
+				return time.Parse("15:04:05.999999", timeStringVal)
 			}
 			return timeStringVal, nil
 		}
 	case "timestamp":
 		return func(field types.Field) (interface{}, error) {
-			t, err := time.Parse("2006-01-02 15:04:05", field.(*types.FieldMemberStringValue).Value)
+			t, err := time.Parse("2006-01-02 15:04:05.999999", field.(*types.FieldMemberStringValue).Value)
 			if err != nil {
 				return nil, err
 			}
 			if d.parseTime {
 				return t, nil
 			}
-			return t.Format(time.RFC3339), nil
+			return t.Format(time.RFC3339Nano), nil
+		}
+	case "timestamptz":
+		// RDS Data API always returns Aurora PostgreSQL timestamptz in UTC
+		// https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api-operations.html
+		return func(field types.Field) (interface{}, error) {
+			s := field.(*types.FieldMemberStringValue).Value
+			t, err := time.Parse("2006-01-02 15:04:05.999999-07:00", s)
+			if err != nil {
+				t, err = time.Parse("2006-01-02 15:04:05.999999-07", s)
+			}
+			if err != nil {
+				t, err = time.Parse("2006-01-02 15:04:05.999999", s)
+				if err != nil {
+					return nil, err
+				}
+				t = t.UTC()
+			}
+			if d.parseTime {
+				return t, nil
+			}
+			return t.Format(time.RFC3339Nano), nil
 		}
 	}
 

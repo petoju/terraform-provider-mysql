@@ -140,7 +140,7 @@ func ConvertNamedValue(arg driver.NamedValue) (value types.SqlParameter, err err
 			Name:     &name,
 			TypeHint: types.TypeHintTimestamp,
 			Value: &types.FieldMemberStringValue{
-				Value: t.Format("2006-01-02 15:04:05.999"),
+				Value: t.Format("2006-01-02 15:04:05.999999"),
 			},
 		}
 	case nil:

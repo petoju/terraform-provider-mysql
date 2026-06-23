@@ -82,6 +82,7 @@ The RDS Postgres version supported is 13.12. Driver parity is tested using `gith
 | Feature          | Limitation                                                                                                                              |
 | :--------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
 | Unsigned Int     | Not natively supported by the AWS SDK's Data API, and are all converted to the int64 type. As such large integer values may be lossy.      |
+| `TIMESTAMPTZ`    | The RDS Data API [always returns `TIMESTAMPTZ` values converted to UTC](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api-operations.html), regardless of the original timezone. |
 | Complex Types    | Postgres complex types - in short anything in [section 8.8](https://www.postgresql.org/docs/10/datatype.html) and after, is not supported. |
 
 ## Options
