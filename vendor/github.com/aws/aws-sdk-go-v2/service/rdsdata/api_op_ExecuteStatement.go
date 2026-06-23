@@ -48,6 +48,16 @@ type ExecuteStatementInput struct {
 	//
 	// For information about creating the secret, see [Create a database secret].
 	//
+	// When you use the CLI on Linux to reference a secret created in the RDS console,
+	// the ARN might include special characters like rds!cluster . If you enclose the
+	// ARN in double quotes, the ! character might trigger a shell expansion error,
+	// such as -bash: !cluster: event not found . To avoid this, escape the exclamation
+	// mark (\!) in the ARN or enclose the entire ARN in single quotes (') instead of
+	// double quotes.
+	//
+	// Alternatively, disable shell history expansion by running set +H before you
+	// execute the command.
+	//
 	// [Create a database secret]: https://docs.aws.amazon.com/secretsmanager/latest/userguide/create_database_secret.html
 	//
 	// This member is required.
@@ -178,7 +188,7 @@ func (c *Client) addOperationExecuteStatementMiddlewares(stack *middleware.Stack
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
+	if err = addRetry(stack, options, c); err != nil {
 		return err
 	}
 	if err = addRawResponseToMetadata(stack); err != nil {
@@ -200,9 +210,6 @@ func (c *Client) addOperationExecuteStatementMiddlewares(stack *middleware.Stack
 		return err
 	}
 	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
 		return err
 	}
 	if err = addUserAgentRetryMode(stack, options); err != nil {

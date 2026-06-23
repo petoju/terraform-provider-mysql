@@ -15,9 +15,241 @@
   "baseUrl": "https://sqladmin.googleapis.com/",
   "batchPath": "batch",
   "canonicalName": "SQL Admin",
-  "description": "API for Cloud SQL database instance management",
+  "description": "Cloud SQL Admin API",
   "discoveryVersion": "v1",
   "documentationLink": "https://cloud.google.com/sql/docs",
+  "endpoints": [
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-east7.rep.googleapis.com/",
+      "location": "us-east7"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.northamerica-northeast1.rep.googleapis.com/",
+      "location": "northamerica-northeast1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.northamerica-northeast2.rep.googleapis.com/",
+      "location": "northamerica-northeast2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-north1.rep.googleapis.com/",
+      "location": "europe-north1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-west2.rep.googleapis.com/",
+      "location": "us-west2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-east2.rep.googleapis.com/",
+      "location": "asia-east2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west3.rep.googleapis.com/",
+      "location": "europe-west3"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-east1.rep.googleapis.com/",
+      "location": "us-east1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-east1.rep.googleapis.com/",
+      "location": "asia-east1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-northeast2.rep.googleapis.com/",
+      "location": "asia-northeast2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.me-central1.rep.googleapis.com/",
+      "location": "me-central1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-central2.rep.googleapis.com/",
+      "location": "europe-central2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.northamerica-south1.rep.googleapis.com/",
+      "location": "northamerica-south1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-west8.rep.googleapis.com/",
+      "location": "us-west8"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.me-west1.rep.googleapis.com/",
+      "location": "me-west1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-northeast3.rep.googleapis.com/",
+      "location": "asia-northeast3"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-west1.rep.googleapis.com/",
+      "location": "us-west1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west9.rep.googleapis.com/",
+      "location": "europe-west9"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-southeast3.rep.googleapis.com/",
+      "location": "asia-southeast3"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west1.rep.googleapis.com/",
+      "location": "europe-west1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-southeast1.rep.googleapis.com/",
+      "location": "asia-southeast1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-west4.rep.googleapis.com/",
+      "location": "us-west4"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west12.rep.googleapis.com/",
+      "location": "europe-west12"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-south2.rep.googleapis.com/",
+      "location": "asia-south2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.australia-southeast1.rep.googleapis.com/",
+      "location": "australia-southeast1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west6.rep.googleapis.com/",
+      "location": "europe-west6"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-east4.rep.googleapis.com/",
+      "location": "us-east4"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-southeast2.rep.googleapis.com/",
+      "location": "asia-southeast2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-southwest1.rep.googleapis.com/",
+      "location": "europe-southwest1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west8.rep.googleapis.com/",
+      "location": "europe-west8"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.africa-south1.rep.googleapis.com/",
+      "location": "africa-south1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.me-central2.rep.googleapis.com/",
+      "location": "me-central2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-central1.rep.googleapis.com/",
+      "location": "us-central1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-central2.rep.googleapis.com/",
+      "location": "us-central2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-north2.rep.googleapis.com/",
+      "location": "europe-north2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-northeast1.rep.googleapis.com/",
+      "location": "asia-northeast1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west2.rep.googleapis.com/",
+      "location": "europe-west2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.southamerica-east1.rep.googleapis.com/",
+      "location": "southamerica-east1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-east5.rep.googleapis.com/",
+      "location": "us-east5"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.asia-south1.rep.googleapis.com/",
+      "location": "asia-south1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west4.rep.googleapis.com/",
+      "location": "europe-west4"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-west3.rep.googleapis.com/",
+      "location": "us-west3"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.australia-southeast2.rep.googleapis.com/",
+      "location": "australia-southeast2"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.southamerica-west1.rep.googleapis.com/",
+      "location": "southamerica-west1"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.europe-west10.rep.googleapis.com/",
+      "location": "europe-west10"
+    },
+    {
+      "description": "Regional Endpoint",
+      "endpointUrl": "https://sqladmin.us-south1.rep.googleapis.com/",
+      "location": "us-south1"
+    }
+  ],
   "fullyEncodeReservedExpansion": true,
   "icons": {
     "x16": "http://www.google.com/images/icons/product/search-16.gif",
@@ -499,6 +731,38 @@
             }
           },
           "path": "sql/v1beta4/projects/{project}/instances/{instance}/connectSettings",
+          "response": {
+            "$ref": "ConnectSettings"
+          },
+          "scopes": [
+            "https://www.googleapis.com/auth/cloud-platform",
+            "https://www.googleapis.com/auth/sqlservice.admin"
+          ]
+        },
+        "resolve": {
+          "description": "Retrieves connect settings about a Cloud SQL instance using the instance DNS name.",
+          "flatPath": "sql/v1beta4/dns/{dnsName}/locations/{location}:resolveConnectSettings",
+          "httpMethod": "GET",
+          "id": "sql.connect.resolve",
+          "parameterOrder": [
+            "dnsName",
+            "location"
+          ],
+          "parameters": {
+            "dnsName": {
+              "description": "Required. Cloud SQL instance ID. This does not include the project ID.",
+              "location": "path",
+              "required": true,
+              "type": "string"
+            },
+            "location": {
+              "description": "Required. The region of the instance.",
+              "location": "path",
+              "required": true,
+              "type": "string"
+            }
+          },
+          "path": "sql/v1beta4/dns/{dnsName}/locations/{location}:resolveConnectSettings",
           "response": {
             "$ref": "ConnectSettings"
           },
@@ -1067,7 +1331,7 @@
               "type": "string"
             },
             "project": {
-              "description": "Project ID of the source as well as the clone Cloud SQL instance.",
+              "description": "Project ID of the source Cloud SQL instance.",
               "location": "path",
               "required": true,
               "type": "string"
@@ -2795,7 +3059,7 @@
       }
     }
   },
-  "revision": "20260303",
+  "revision": "20260529",
   "rootUrl": "https://sqladmin.googleapis.com/",
   "schemas": {
     "AclEntry": {
@@ -2985,6 +3249,8 @@
             "POSTGRES_16",
             "POSTGRES_17",
             "POSTGRES_18",
+            "POSTGRES_19",
+            "POSTGRES_20",
             "SQLSERVER_2019_STANDARD",
             "SQLSERVER_2019_ENTERPRISE",
             "SQLSERVER_2019_EXPRESS",
@@ -3009,6 +3275,8 @@
             false,
             false,
             true,
+            false,
+            false,
             false,
             false,
             false,
@@ -3097,6 +3365,8 @@
             "The database version is PostgreSQL 16.",
             "The database version is PostgreSQL 17.",
             "The database version is PostgreSQL 18.",
+            "The database version is PostgreSQL 19.",
+            "The database version is PostgreSQL 20.",
             "The database version is SQL Server 2019 Standard.",
             "The database version is SQL Server 2019 Enterprise.",
             "The database version is SQL Server 2019 Express.",
@@ -3459,6 +3729,8 @@
             "POSTGRES_16",
             "POSTGRES_17",
             "POSTGRES_18",
+            "POSTGRES_19",
+            "POSTGRES_20",
             "SQLSERVER_2019_STANDARD",
             "SQLSERVER_2019_ENTERPRISE",
             "SQLSERVER_2019_EXPRESS",
@@ -3483,6 +3755,8 @@
             false,
             false,
             true,
+            false,
+            false,
             false,
             false,
             false,
@@ -3571,6 +3845,8 @@
             "The database version is PostgreSQL 16.",
             "The database version is PostgreSQL 17.",
             "The database version is PostgreSQL 18.",
+            "The database version is PostgreSQL 19.",
+            "The database version is PostgreSQL 20.",
             "The database version is SQL Server 2019 Standard.",
             "The database version is SQL Server 2019 Enterprise.",
             "The database version is SQL Server 2019 Express.",
@@ -3764,7 +4040,7 @@
           "type": "string"
         },
         "destinationNetwork": {
-          "description": "Optional. The fully qualified URI of the VPC network to which the cloned instance will be connected via Private Services Access for private IP. For example:`projects/my-network-project/global/networks/my-network`. This field is only required for cross-project cloning.",
+          "description": "Optional. The fully qualified URI of the VPC network to which the cloned instance will be connected via private services access for private IP. For example:`projects/my-network-project/global/networks/my-network`. This field is only required for cross-project cloning.",
           "type": "string"
         },
         "destinationProject": {
@@ -3928,6 +4204,8 @@
             "POSTGRES_16",
             "POSTGRES_17",
             "POSTGRES_18",
+            "POSTGRES_19",
+            "POSTGRES_20",
             "SQLSERVER_2019_STANDARD",
             "SQLSERVER_2019_ENTERPRISE",
             "SQLSERVER_2019_EXPRESS",
@@ -3952,6 +4230,8 @@
             false,
             false,
             true,
+            false,
+            false,
             false,
             false,
             false,
@@ -4040,6 +4320,8 @@
             "The database version is PostgreSQL 16.",
             "The database version is PostgreSQL 17.",
             "The database version is PostgreSQL 18.",
+            "The database version is PostgreSQL 19.",
+            "The database version is PostgreSQL 20.",
             "The database version is SQL Server 2019 Standard.",
             "The database version is SQL Server 2019 Enterprise.",
             "The database version is SQL Server 2019 Express.",
@@ -4345,6 +4627,8 @@
             "POSTGRES_16",
             "POSTGRES_17",
             "POSTGRES_18",
+            "POSTGRES_19",
+            "POSTGRES_20",
             "SQLSERVER_2019_STANDARD",
             "SQLSERVER_2019_ENTERPRISE",
             "SQLSERVER_2019_EXPRESS",
@@ -4369,6 +4653,8 @@
             false,
             false,
             true,
+            false,
+            false,
             false,
             false,
             false,
@@ -4457,6 +4743,8 @@
             "The database version is PostgreSQL 16.",
             "The database version is PostgreSQL 17.",
             "The database version is PostgreSQL 18.",
+            "The database version is PostgreSQL 19.",
+            "The database version is PostgreSQL 20.",
             "The database version is SQL Server 2019 Standard.",
             "The database version is SQL Server 2019 Enterprise.",
             "The database version is SQL Server 2019 Express.",
@@ -4725,14 +5013,16 @@
               "BILLING_ISSUE",
               "LEGAL_ISSUE",
               "OPERATIONAL_ISSUE",
-              "KMS_KEY_ISSUE"
+              "KMS_KEY_ISSUE",
+              "PROJECT_ABUSE"
             ],
             "enumDescriptions": [
               "This is an unknown suspension reason.",
               "The instance is suspended due to billing issues (for example:, account issue)",
               "The instance is suspended due to illegal content (for example:, child pornography, copyrighted material, etc.).",
               "The instance is causing operational issues (for example:, causing the database to crash).",
-              "The KMS key used by the instance is either revoked or denied access to"
+              "The KMS key used by the instance is either revoked or denied access to",
+              "The project is suspended due to abuse detected by Ares."
             ],
             "type": "string"
           },
@@ -5333,6 +5623,8 @@
               "POSTGRES_16",
               "POSTGRES_17",
               "POSTGRES_18",
+              "POSTGRES_19",
+              "POSTGRES_20",
               "SQLSERVER_2019_STANDARD",
               "SQLSERVER_2019_ENTERPRISE",
               "SQLSERVER_2019_EXPRESS",
@@ -5357,6 +5649,8 @@
               false,
               false,
               true,
+              false,
+              false,
               false,
               false,
               false,
@@ -5445,6 +5739,8 @@
               "The database version is PostgreSQL 16.",
               "The database version is PostgreSQL 17.",
               "The database version is PostgreSQL 18.",
+              "The database version is PostgreSQL 19.",
+              "The database version is PostgreSQL 20.",
               "The database version is SQL Server 2019 Standard.",
               "The database version is SQL Server 2019 Enterprise.",
               "The database version is SQL Server 2019 Express.",
@@ -6635,7 +6931,9 @@
             "MANAGE_BACKUP",
             "ENHANCED_BACKUP",
             "REPAIR_READ_POOL",
-            "CREATE_READ_POOL"
+            "CREATE_READ_POOL",
+            "PRE_CHECK_MAJOR_VERSION_UPGRADE",
+            "SETUP_MIGRATION"
           ],
           "enumDeprecated": [
             false,
@@ -6686,6 +6984,8 @@
             false,
             false,
             true,
+            false,
+            false,
             false,
             false,
             false,
@@ -6743,7 +7043,9 @@
             "Changes the BackupTier of a Cloud SQL instance.",
             "Creates a backup for an Enhanced BackupTier Cloud SQL instance.",
             "Repairs entire read pool or specified read pool nodes in the read pool.",
-            "Creates a Cloud SQL read pool instance."
+            "Creates a Cloud SQL read pool instance.",
+            "Pre-checks for major version upgrade.",
+            "This operation type represents individual steps in a multi-step setup migration workflow: including configuration, replication, switchover/back, and data reseeding, as defined by operation's intent."
           ],
           "type": "string"
         },
@@ -6977,35 +7279,35 @@
       "type": "object"
     },
     "PerformanceCaptureConfig": {
-      "description": "Performance Capture configuration.",
+      "description": "Performance capture configuration.",
       "id": "PerformanceCaptureConfig",
       "properties": {
         "enabled": {
-          "description": "Optional. Enable or disable the Performance Capture.",
+          "description": "Optional. Enables or disables the performance capture feature.",
           "type": "boolean"
         },
         "probeThreshold": {
-          "description": "Optional. The minimum number of consecutive readings above threshold that triggers instance state capture.",
+          "description": "Optional. Specifies the minimum number of consecutive probe threshold that triggers performance capture.",
           "format": "int32",
           "type": "integer"
         },
         "probingIntervalSeconds": {
-          "description": "Optional. The time interval in seconds between any two probes.",
+          "description": "Optional. Specifies the interval in seconds between consecutive probes that check if any trigger condition thresholds have been reached.",
           "format": "int32",
           "type": "integer"
         },
         "runningThreadsThreshold": {
-          "description": "Optional. The minimum number of server threads running to trigger the capture on primary.",
+          "description": "Optional. Specifies the minimum number of MySQL `Threads_running` to trigger the performance capture on the primary instance.",
           "format": "int32",
           "type": "integer"
         },
         "secondsBehindSourceThreshold": {
-          "description": "Optional. The minimum number of seconds replica must be lagging behind primary to trigger capture on replica.",
+          "description": "Optional. Specifies the minimum number of seconds replica must be lagging behind primary instance to trigger the performance capture on replica.",
           "format": "int32",
           "type": "integer"
         },
         "transactionDurationThreshold": {
-          "description": "Optional. The amount of time in seconds that a transaction needs to have been open before the watcher starts recording it.",
+          "description": "Optional. Specifies the amount of time in seconds that a transaction needs to have been open before the watcher starts recording it.",
           "format": "int32",
           "type": "integer"
         }
@@ -7214,6 +7516,8 @@
             "POSTGRES_16",
             "POSTGRES_17",
             "POSTGRES_18",
+            "POSTGRES_19",
+            "POSTGRES_20",
             "SQLSERVER_2019_STANDARD",
             "SQLSERVER_2019_ENTERPRISE",
             "SQLSERVER_2019_EXPRESS",
@@ -7238,6 +7542,8 @@
             false,
             false,
             true,
+            false,
+            false,
             false,
             false,
             false,
@@ -7326,6 +7632,8 @@
             "The database version is PostgreSQL 16.",
             "The database version is PostgreSQL 17.",
             "The database version is PostgreSQL 18.",
+            "The database version is PostgreSQL 19.",
+            "The database version is PostgreSQL 20.",
             "The database version is SQL Server 2019 Standard.",
             "The database version is SQL Server 2019 Enterprise.",
             "The database version is SQL Server 2019 Express.",
@@ -7397,6 +7705,16 @@
           "description": "The IP address of the consumer endpoint.",
           "type": "string"
         },
+        "serviceConnectionPolicy": {
+          "description": "Output only. The service connection policy created automatically for the consumer network when `psc_auto_connection_policy_enabled` is true. It is in the format of: `projects/{project}/regions/{region}/serviceConnectionPolicies/{policy_id}` The `policy_id` is in format of `$NETWORK-$RANDOM`.",
+          "readOnly": true,
+          "type": "string"
+        },
+        "serviceConnectionPolicyCreationResult": {
+          "description": "Output only. The status of service connection policy creation.",
+          "readOnly": true,
+          "type": "string"
+        },
         "status": {
           "description": "The connection status of the consumer endpoint.",
           "type": "string"
@@ -7419,6 +7737,10 @@
           "description": "Optional. The network attachment of the consumer network that the Private Service Connect enabled Cloud SQL instance is authorized to connect via PSC interface. format: projects/PROJECT/regions/REGION/networkAttachments/ID",
           "type": "string"
         },
+        "pscAutoConnectionPolicyEnabled": {
+          "description": "Optional. Whether to set up the PSC service connection policy automatically.",
+          "type": "boolean"
+        },
         "pscAutoConnections": {
           "description": "Optional. The list of settings for requested Private Service Connect consumer endpoints that can be used to connect to this Cloud SQL instance.",
           "items": {
@@ -7426,8 +7748,16 @@
           },
           "type": "array"
         },
+        "pscAutoDnsEnabled": {
+          "description": "Optional. Indicates whether Private Service Connect DNS automation is enabled for this instance. When enabled, Cloud SQL provisions a universal DNS record across all networks configured with Private Service Connect auto-connections. This will default to true for new instances when Private Service Connect is enabled.",
+          "type": "boolean"
+        },
         "pscEnabled": {
           "description": "Whether PSC connectivity is enabled for this instance.",
+          "type": "boolean"
+        },
+        "pscWriteEndpointDnsEnabled": {
+          "description": "Optional. Indicates whether Private Service Connect write endpoint DNS automation is enabled for this instance. When enabled, Cloud SQL provisions a universal global DNS record across all networks configured with Private Service Connect auto-connections that points to the cluster primary instance. This feature is only supported for Enterprise Plus edition. This will default to true for new enterprise plus instances when `psc_auto_dns_enabled` is enabled.",
           "type": "boolean"
         }
       },
@@ -7849,16 +8179,18 @@
           "type": "array"
         },
         "edition": {
-          "description": "Optional. The edition of the instance.",
+          "description": "Optional. The edition type of the Cloud SQL instance.",
           "enum": [
             "EDITION_UNSPECIFIED",
             "ENTERPRISE",
-            "ENTERPRISE_PLUS"
+            "ENTERPRISE_PLUS",
+            "DEVELOPER"
           ],
           "enumDescriptions": [
             "The instance did not specify the edition.",
             "The instance is an enterprise edition.",
-            "The instance is an Enterprise Plus edition."
+            "The instance is an Enterprise Plus edition.",
+            "This instance is a Cloud SQL developer edition instance."
           ],
           "type": "string"
         },
@@ -8936,6 +9268,7 @@
             "CLOUD_IAM_GROUP",
             "CLOUD_IAM_GROUP_USER",
             "CLOUD_IAM_GROUP_SERVICE_ACCOUNT",
+            "CLOUD_IAM_WORKFORCE_IDENTITY",
             "ENTRAID_USER"
           ],
           "enumDescriptions": [
@@ -8945,6 +9278,7 @@
             "Cloud IAM group. Not used for login.",
             "Read-only. Login for a user that belongs to the Cloud IAM group.",
             "Read-only. Login for a service account that belongs to the Cloud IAM group.",
+            "Cloud IAM workforce identity user managed via workforce identity federation.",
             "Microsoft Entra ID user."
           ],
           "type": "string"
