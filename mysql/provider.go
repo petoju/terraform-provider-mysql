@@ -323,16 +323,17 @@ func Provider() *schema.Provider {
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
-			"mysql_database":        resourceDatabase(),
-			"mysql_global_variable": resourceGlobalVariable(),
-			"mysql_grant":           resourceGrant(),
-			"mysql_role":            resourceRole(),
-			"mysql_sql":             resourceSql(),
-			"mysql_user_password":   resourceUserPassword(),
-			"mysql_user":            resourceUser(),
-			"mysql_ti_config":       resourceTiConfigVariable(),
-			"mysql_rds_config":      resourceRDSConfig(),
-			"mysql_default_roles":   resourceDefaultRoles(),
+			"mysql_database":             resourceDatabase(),
+			"mysql_global_variable":      resourceGlobalVariable(),
+			"mysql_grant":                resourceGrant(),
+			"mysql_role":                 resourceRole(),
+			"mysql_sql":                  resourceSql(),
+			"mysql_user_password":        resourceUserPassword(),
+			"mysql_user":                 resourceUser(),
+			"mysql_ti_config":            resourceTiConfigVariable(),
+			"mysql_rds_config":           resourceRDSConfig(),
+			"mysql_default_roles":        resourceDefaultRoles(),
+			"mysql_cloud_sql_audit_rule": resourceCloudSQLAuditRule(),
 		},
 
 		ConfigureContextFunc: providerConfigure,
@@ -901,6 +902,19 @@ func serverTiDB(db *sql.DB) (bool, string, string, error) {
 	}
 
 	return false, "", "", nil
+}
+
+func serverGoogleCloudSQL(db *sql.DB) (bool, error) {
+	currentVersionString, err := serverVersionString(db)
+	if err != nil {
+		return false, err
+	}
+
+	if strings.HasSuffix(currentVersionString, "-google") {
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func serverRds(db *sql.DB) (bool, error) {
