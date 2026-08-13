@@ -191,6 +191,25 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
+func testAccPreCheckSkipNotGoogleCloudSQL(t *testing.T) {
+	testAccPreCheck(t)
+
+	ctx := context.Background()
+	db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+	if err != nil {
+		return
+	}
+
+	isCloudSQL, err := serverGoogleCloudSQL(db)
+	if err != nil {
+		return
+	}
+
+	if !isCloudSQL {
+		t.Skip("Skip on non Google Cloud SQL instance")
+	}
+}
+
 func testAccPreCheckSkipNotRds(t *testing.T) {
 	testAccPreCheck(t)
 
