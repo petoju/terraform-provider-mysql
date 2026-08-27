@@ -30,3 +30,11 @@ The following arguments are supported:
 ## Attributes Reference
 
 No further attributes are exported.
+
+## Import
+
+Roles can be imported using their name, e.g.
+
+```
+$ terraform import mysql_role.example my-role
+```

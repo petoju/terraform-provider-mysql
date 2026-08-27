@@ -14,6 +14,9 @@ func resourceRole() *schema.Resource {
 		CreateContext: CreateRole,
 		ReadContext:   ReadRole,
 		DeleteContext: DeleteRole,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -33,7 +36,7 @@ func CreateRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 
 	roleName := d.Get("name").(string)
 
-	sql := fmt.Sprintf("CREATE ROLE '%s'", roleName)
+	sql := fmt.Sprintf("CREATE ROLE %s", quoteString(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
@@ -52,17 +55,23 @@ func ReadRole(ctx context.Context, d *schema.ResourceData, meta interface{}) dia
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("SHOW GRANTS FOR '%s'", d.Id())
+	roleName := d.Id()
+
+	sql := fmt.Sprintf("SHOW GRANTS FOR %s", quoteString(roleName))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
 	if err != nil {
-		log.Printf("[WARN] Role (%s) not found; removing from state", d.Id())
-		d.SetId("")
-		return nil
+		errorNumber := mysqlErrorNumber(err)
+		if errorNumber == nonExistingGrantErrCode || errorNumber == userNotFoundErrCode {
+			log.Printf("[WARN] Role (%s) not found; removing from state", roleName)
+			d.SetId("")
+			return nil
+		}
+		return diag.Errorf("error reading role %s: %s", roleName, err)
 	}
 
-	d.Set("name", d.Id())
+	d.Set("name", roleName)
 
 	return nil
 }
@@ -73,7 +82,7 @@ func DeleteRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 		return diag.FromErr(err)
 	}
 
-	sql := fmt.Sprintf("DROP ROLE '%s'", d.Get("name").(string))
+	sql := fmt.Sprintf("DROP ROLE %s", quoteString(d.Get("name").(string)))
 	log.Printf("[DEBUG] SQL: %s", sql)
 
 	_, err = db.ExecContext(ctx, sql)
