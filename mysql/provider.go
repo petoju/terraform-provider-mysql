@@ -45,14 +45,15 @@ import (
 )
 
 const (
-	cleartextPasswords  = "cleartext"
-	nativePasswords     = "native"
-	userNotFoundErrCode = 1133
-	unknownUserErrCode  = 1396
-	azEnvPublic         = "public"
-	azEnvChina          = "china"
-	azEnvGerman         = "german"
-	azEnvUSGovernment   = "usgovernment"
+	cleartextPasswords      = "cleartext"
+	nativePasswords         = "native"
+	userNotFoundErrCode     = 1133
+	unknownUserErrCode      = 1396
+	nonExistingGrantErrCode = 1141
+	azEnvPublic             = "public"
+	azEnvChina              = "china"
+	azEnvGerman             = "german"
+	azEnvUSGovernment       = "usgovernment"
 )
 
 type DbConnection struct {
