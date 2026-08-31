@@ -106,7 +106,7 @@ func TestAccRole_importUserIsRejected(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
 			testAccPreCheckSkipRds(t)
-			testAccPreCheckSkipNotMySQL8(t)
+			testAccPreCheckRequireMariaDB(t)
 		},
 		ProviderFactories: testAccProviderFactories,
 		Steps: []resource.TestStep{
@@ -125,8 +125,7 @@ func TestAccRole_importUserIsRejected(t *testing.T) {
 	})
 }
 
-// TestAccClassifyAccount covers role detection, including a role later given a password,
-// which only mysql.role_edges identifies.
+// TestAccClassifyAccount covers role detection, including a role later given a password.
 func TestAccClassifyAccount(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("TF_ACC must be set for acceptance tests")
@@ -178,11 +177,17 @@ func TestAccClassifyAccount(t *testing.T) {
 	mustExec(fmt.Sprintf("CREATE USER %s@'%%' IDENTIFIED BY 'Sekrit-Password-1'", quoteString(plainUser)))
 	mustExec(fmt.Sprintf("GRANT %s TO %s@'%%'", quoteString(grantedRole), quoteString(holder)))
 
+	// Only MariaDB identifies a login user; elsewhere an ordinary account is unknown.
+	userVerdict := accountUnknown
+	if isMariaDB {
+		userVerdict = accountUser
+	}
+
 	expected := map[string]accountKind{
 		plainRole:   accountRole,
 		grantedRole: accountRole,
-		plainUser:   accountUser,
-		holder:      accountUser,
+		plainUser:   userVerdict,
+		holder:      userVerdict,
 		absent:      accountMissing,
 	}
 
