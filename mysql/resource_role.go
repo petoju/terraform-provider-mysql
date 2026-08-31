@@ -104,11 +104,8 @@ func DeleteRole(ctx context.Context, d *schema.ResourceData, meta interface{}) d
 	return nil
 }
 
-// classifyAccount reports whether name is a role or a login user. MariaDB records this in
-// mysql.user.is_role; MySQL, Percona and TiDB do not distinguish the two, so we combine the
-// state CREATE ROLE leaves behind - locked, no password - with mysql.role_edges, which only
-// lists accounts granted to somebody. Returns accountUnknown rather than an error when the
-// lookup is unavailable.
+// classifyAccount reports whether name is a role or a login user. Only MariaDB identifies a
+// user; elsewhere a role is confirmed positively and anything else is accountUnknown.
 func classifyAccount(ctx context.Context, db *sql.DB, name string) accountKind {
 	isMariaDB, err := serverMariaDB(db)
 	if err != nil {
@@ -155,11 +152,11 @@ func classifyAccount(ctx context.Context, db *sql.DB, name string) accountKind {
 		return accountRole
 	}
 
-	return accountUser
+	// Not being granted proves nothing, so report unknown rather than assuming a user.
+	return accountUnknown
 }
 
-// grantedAsRole reports whether name has been granted to another account, which only happens
-// to roles. A failed lookup means "no evidence": mysql.role_edges is absent before MySQL 8.
+// grantedAsRole reports whether name was granted to somebody, which only happens to roles.
 func grantedAsRole(ctx context.Context, db *sql.DB, name string) bool {
 	var granted int
 	err := db.QueryRowContext(ctx,
@@ -172,9 +169,8 @@ func grantedAsRole(ctx context.Context, db *sql.DB, name string) bool {
 	return granted == 1
 }
 
-// ImportRole refuses an account that is really a login user, so importing the wrong name
-// fails loudly. Existence is left to ReadRole, which Terraform calls next: clearing the ID
-// here would trip the SDK's "missing resource during ImportResourceState" error instead.
+// ImportRole refuses a name known to be a login user. Existence is left to ReadRole:
+// clearing the ID here would trip the SDK's "missing resource" error instead.
 func ImportRole(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	db, err := getDatabaseFromMeta(ctx, meta)
 	if err != nil {

@@ -39,17 +39,15 @@ Roles can be imported using their name, e.g.
 $ terraform import mysql_role.example my-role
 ```
 
-Import refuses names that belong to a login user rather than a role, so importing the wrong
-name fails with a clear error instead of quietly bringing a user under `mysql_role`
-management.
+On MariaDB, importing a name that belongs to a login user rather than a role fails with a
+clear error, using `mysql.user.is_role`.
 
-On MariaDB this is exact, using `mysql.user.is_role`. On MySQL, Percona and TiDB roles and
-users are the same kind of object, so two signals are combined: the state `CREATE ROLE`
-leaves behind (a locked account with no password), and whether the account appears in
-`mysql.role_edges`, which only happens once it has been granted to somebody. The second
-signal matters for a role that was later given a password or unlocked, which the first would
-otherwise mistake for a user.
+MySQL, Percona and TiDB do not distinguish roles from users at engine level - both are rows
+in `mysql.user`, and a role can be given a password and unlocked like any other account.
+There the provider can only confirm a role positively: by the state `CREATE ROLE` leaves
+behind (a locked account with no password), or by the account appearing in
+`mysql.role_edges`, which happens once it has been granted to somebody.
 
-The check is best-effort: it reads `mysql.user`, and on MySQL-compatible servers also
-`mysql.role_edges`. Where those are not readable the import proceeds with a warning in the
-logs rather than failing, so verify the name is a role yourself in that case.
+~> **Note:** A name that cannot be confirmed either way is imported anyway, with a warning
+logged, rather than being refused - so on those servers importing a name that is really a
+user will succeed. Make sure the name you pass is a role.
