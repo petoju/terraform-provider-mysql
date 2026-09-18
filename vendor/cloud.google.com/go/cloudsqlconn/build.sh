@@ -18,6 +18,13 @@
 SCRIPT_DIR=$(cd -P "$(dirname "$0")" >/dev/null 2>&1 && pwd)
 SCRIPT_FILE="${SCRIPT_DIR}/$(basename "$0")"
 
+if [[ -z "${GITHUB_TOKEN:-}" ]] && command -v gh &> /dev/null; then
+  GITHUB_TOKEN=$(gh auth token 2>/dev/null || true)
+  if [[ -n "$GITHUB_TOKEN" ]]; then
+    export GITHUB_TOKEN
+  fi
+fi
+
 ##
 ## Local Development
 ##
@@ -35,10 +42,7 @@ function clean() {
 function generate() {
   set -x
   get_protoc
-  generated_pb_go=("internal/mdx/metadata_exchange.pb.go"
-    "internal/sqldatagrpc/sql_data_service_grpc.pb.go"
-    "internal/sqldata/sql_data_service.pb.go"
-    )
+  generated_pb_go=("internal/mdx/metadata_exchange.pb.go")
 
   # Delete the old pb files
   for pbFile in  "${generated_pb_go[@]}" ; do
@@ -54,38 +58,6 @@ function generate() {
     --go_opt=default_api_level=API_OPAQUE \
     internal/mdx/metadata_exchange.proto \
     --go_opt=paths=source_relative
-
-  # Generate SqlDataService proto messages
-  PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
-    -I "${SCRIPT_DIR}/internal/google_apis" \
-    --proto_path=. \
-    --go_out=. \
-    --go_opt=paths=source_relative \
-    internal/sqldata/sql_data_service.proto
-
-  # Generate SqlDataService proto grpc stubs
-  PATH="${SCRIPT_DIR}/.tools/protoc/bin:$PATH" "${SCRIPT_DIR}/.tools/protoc/bin/protoc" \
-    -I "${SCRIPT_DIR}/internal/google_apis" \
-    --proto_path=. \
-    --go-grpc_out=.\
-    --go-grpc_opt=paths=source_relative, \
-    internal/sqldata/sql_data_service.proto
-
-
-  # Move the sql_data_service_grpc.pb.go into a separate directory
-  # so that it may be referenced from a different package
-  dest_file="$SCRIPT_DIR/internal/sqldatagrpc/sql_data_service_grpc.pb.go"
-  mkdir -p "$SCRIPT_DIR/internal/sqldatagrpc"
-  mv "$SCRIPT_DIR/internal/sqldata/sql_data_service_grpc.pb.go" "$dest_file"
-  if [[ $(uname) == "Darwin" ]] ; then
-    sed -i '' 's|^package sqldata$|package sqldatagrpc\nimport sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"|' "$dest_file"
-    sed -i '' 's/StreamSqlDataRequest/sqldatapb.StreamSqlDataRequest/' "$dest_file"
-    sed -i '' 's/StreamSqlDataResponse/sqldatapb.StreamSqlDataResponse/' "$dest_file"
-  else
-    sed -i 's|^package sqldata$|package sqldatagrpc\nimport sqldatapb "cloud.google.com/go/cloudsqlconn/internal/sqldata"|' "$dest_file"
-    sed -i 's/StreamSqlDataRequest/sqldatapb.StreamSqlDataRequest/' "$dest_file"
-    sed -i 's/StreamSqlDataResponse/sqldatapb.StreamSqlDataResponse/' "$dest_file"
-  fi
 
   # Add the copyright header to the generated protobuf file
   for pbFile in  "${generated_pb_go[@]}" ; do
@@ -113,10 +85,14 @@ EOF
 
 # Download the protoc tool if it's not already installed.
 function get_protoc() {
+  headers=()
+  if [[ -n "${GITHUB_TOKEN}" ]]; then
+    headers+=("-H" "Authorization: token ${GITHUB_TOKEN}")
+  fi
   # Find the latest version of protoc
-  protoc_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
-  proto_go_version=$(curl -s "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
-  proto_grpc_go_version=$(curl -s "https://api.github.com/repos/grpc/grpc-go/releases" | jq -r '.[].tag_name' | grep cmd/protoc-gen-go-grpc | sed 's|cmd/protoc-gen-go-grpc/v||' | head -n1)
+  protoc_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  proto_go_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/protocolbuffers/protobuf-go/releases/latest" | jq -r '.tag_name' | sed 's/v//')
+  proto_grpc_go_version=$(curl -s "${headers[@]}" "https://api.github.com/repos/grpc/grpc-go/releases" | jq -r '.[].tag_name' | grep cmd/protoc-gen-go-grpc | sed 's|cmd/protoc-gen-go-grpc/v||' | head -n1)
 
   mkdir -p "$SCRIPT_DIR/.tools"
   versioned_cmd="$SCRIPT_DIR/.tools/protoc-$protoc_version"
@@ -167,7 +143,7 @@ function get_protoc() {
 ## build - Builds the project without running tests.
 function build() {
   generate
-  go build ./...
+  go build -buildvcs=false ./...
 }
 
 ## test - Runs local unit tests.
@@ -176,7 +152,7 @@ function test() {
   get_golang_tool 'go-junit-report' 'jstemmer/go-junit-report' 'github.com/jstemmer/go-junit-report/v2'
   mkdir -p test-results
 
-  go test -v -race -cover -short -json \
+  go test -v -race -cover -short -json "$@" \
     | .tools/go-junit-report -iocopy -parser gojson -out test-results/unit.xml \
           | jq -j 'select(.Output) | .Output'
 }
@@ -207,8 +183,13 @@ function get_golang_tool() {
   github_repo="$2"
   package="$3"
   set -x
+
+  headers=()
+  if [[ -n "${GITHUB_TOKEN}" ]]; then
+    headers+=("-H" "Authorization: token ${GITHUB_TOKEN}")
+  fi
   # Download goimports tool
-  version=$(curl -s "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
+  version=$(curl -s "${headers[@]}" "https://api.github.com/repos/$github_repo/tags" | jq -r '.[].name' | head -n 1)
   mkdir -p "$SCRIPT_DIR/.tools"
   cmd="$SCRIPT_DIR/.tools/$name"
   versioned_cmd="$SCRIPT_DIR/.tools/$name-$version"
@@ -287,6 +268,14 @@ function write_e2e_env(){
     POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME=POSTGRES_CUSTOMER_CAS_INVALID_DOMAIN_NAME
     POSTGRES_MCP_CONNECTION_NAME=POSTGRES_MCP_CONNECTION_NAME
     POSTGRES_MCP_PASS=POSTGRES_MCP_PASS
+    POSTGRES_AIDE_CONNECTION_NAME=POSTGRES_AIDE_CONNECTION_NAME
+    POSTGRES_AIDE_USER=POSTGRES_AIDE_USER
+    POSTGRES_AIDE_PASS=POSTGRES_AIDE_PASS
+    POSTGRES_AIDE_DB=POSTGRES_AIDE_DB
+    POSTGRES_FALLBACK_CONNECTION_NAME=POSTGRES_FALLBACK_CONNECTION_NAME
+    POSTGRES_FALLBACK_USER=POSTGRES_FALLBACK_USER
+    POSTGRES_FALLBACK_PASS=POSTGRES_FALLBACK_PASS
+    POSTGRES_FALLBACK_DB=POSTGRES_FALLBACK_DB
     SQLSERVER_CONNECTION_NAME=SQLSERVER_CONNECTION_NAME
     SQLSERVER_USER=SQLSERVER_USER
     SQLSERVER_PASS=SQLSERVER_PASS
@@ -321,7 +310,7 @@ function iam_user_pg() {
   local pguser
 
   email="$(iam_user_email)"
-  pguser="${email%%.iam.gserviceaccount.com}"
+  pguser="${email%%.gserviceaccount.com}"
   if [[ -n "$pguser" ]] ; then
     echo "$pguser"
   else

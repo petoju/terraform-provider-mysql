@@ -1,5 +1,64 @@
 # Changelog
 
+## [1.25.2](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.1...v1.25.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* prioritize PSC auto-DNS names (.sql-psc.goog) and aggregate dial errors ([#1153](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1153)) ([390df16](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/390df1666d770be5ccc50ece29eeea9d45f88875))
+
+## [1.25.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.25.0...v1.25.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* Ensure that the SqlDataEndpoint includes the default port :443 ([#1148](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1148)) ([a399bd5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/a399bd587f4fd1ade5586b39a52f0d6d26b1c77d))
+
+## [1.25.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.24.0...v1.25.0) (2026-08-13)
+
+
+### Features
+
+* replace local generated gRPC client with GAPIC client library ([#1145](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1145)) ([5203f19](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/5203f19f378c5297a0112bd654fbd842b7f98489))
+
+
+### Bug Fixes
+
+* Optimize DNS resolution logic ([#1143](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1143)) ([ca3c760](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/ca3c760bd6b2a0b6da4116355656276ba1d98084))
+
+## [1.24.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.23.0...v1.24.0) (2026-08-07)
+
+
+### Features
+
+* implement cooldown on ResourceExhausted errors ([#1141](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1141)) ([5de0cf4](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/5de0cf4e848173a30212ad7b582780b4e513e3c3))
+
+
+### Bug Fixes
+
+* Address code review comments on PSC DNS error handling ([#1140](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1140)) ([57703a5](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/57703a50d85390a2fe36c51929b85397d1b03fa0))
+
+## [1.23.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.22.1...v1.23.0) (2026-07-23)
+
+
+### Features
+
+* Add PSC DNS and Global Write Endpoint support to Go Connector ([#1106](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1106)) ([7061e54](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/7061e54131545b26728f6b13455e7145f8a44a14))
+
+
+### Bug Fixes
+
+* Correctly identify unsupported instance edition error. ([#1130](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1130)) ([8e7ec2f](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/8e7ec2f75f3b9311f88b970ab1bb117fe61ac7c5))
+* update go dependencies ([#1134](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1134)) ([028e616](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/028e6166ffe72257db2e1ea34a205972b635e1d1))
+* use generated XML in integration tests workflow ([#1136](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1136)) ([87db30d](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/87db30df846a58e577707c1e1facd89bbcc8bfe3))
+
+## [1.22.1](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.22.0...v1.22.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* update dependencies to latest ([#1117](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/issues/1117)) ([92b91e3](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/commit/92b91e34404eeb1191c11c4b2d1b6c1e709d54a2))
+
 ## [1.22.0](https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/compare/v1.21.2...v1.22.0) (2026-06-11)
 
 

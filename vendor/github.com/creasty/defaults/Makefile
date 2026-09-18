@@ -1,29 +1,43 @@
 SHELL := /bin/bash -eu -o pipefail
 
-GO_TEST_FLAGS  := -v
-
-PACKAGE_DIRS := $(shell go list ./... 2> /dev/null | grep -v /vendor/)
-SRC_FILES    := $(shell find . -name '*.go' -not -path './vendor/*')
+GO_TEST_FLAGS := -race -shuffle=on
+COVERAGE_MIN  := 100.0
 
 
 #  Tasks
 #-----------------------------------------------
 .PHONY: lint
 lint:
-	@gofmt -e -d -s $(SRC_FILES) | awk '{ e = 1; print $0 } END { if (e) exit(1) }'
-	@golangci-lint --disable errcheck,unused run
+	@golangci-lint run
+
+.PHONY: fmt
+fmt:
+	@golangci-lint fmt
 
 .PHONY: test
-test: lint
-	@go test $(GO_TEST_FLAGS) $(PACKAGE_DIRS)
+test:
+	@go test $(GO_TEST_FLAGS) ./...
 
-.PHONY: ci-test
-ci-test: lint
-	@echo > coverage.txt
-	@for d in $(PACKAGE_DIRS); do \
-		go test -coverprofile=profile.out -covermode=atomic -race -v $$d; \
-		if [ -f profile.out ]; then \
-			cat profile.out >> coverage.txt; \
-			rm profile.out; \
-		fi; \
-	done
+.PHONY: bench
+bench:
+	@go test -run '^$$' -bench . -benchmem .
+
+.PHONY: bench-smoke
+bench-smoke:
+	@go test -run '^$$' -bench . -benchtime 1x .
+
+# $(value ...) passes each variable as typed: $(BENCH) would expand the $ in a pattern such as
+# '^BenchmarkParse$'. The defaults live in the script.
+.PHONY: bench-compare
+bench-compare:
+	@BASE='$(value BASE)' ROUNDS='$(value ROUNDS)' BENCH='$(value BENCH)' BENCHTIME='$(value BENCHTIME)' bash scripts/bench-compare.sh
+
+.PHONY: cover
+cover:
+	@go test $(GO_TEST_FLAGS) -covermode=atomic -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out
+	@total="$$(go tool cover -func=coverage.out | awk '/^total:/ { print $$3 }')"; \
+		if [ "$$total" != "$(COVERAGE_MIN)%" ]; then \
+			echo "coverage is $$total, below the required $(COVERAGE_MIN)%" >&2; \
+			exit 1; \
+		fi

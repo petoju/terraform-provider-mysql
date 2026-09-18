@@ -39,34 +39,37 @@ import (
 type Option func(d *dialerConfig)
 
 type dialerConfig struct {
-	rsaKey                   *rsa.PrivateKey
-	sqladminOpts             []apiopt.ClientOption
-	dialOpts                 []DialOption
-	dialFunc                 func(ctx context.Context, network, addr string) (net.Conn, error)
-	refreshTimeout           time.Duration
-	useIAMAuthN              bool
-	logger                   debug.ContextLogger
-	lazyRefresh              bool
-	sqlDataEndpoint          string
-	clientUniverseDomain     string
-	quotaProject             string
-	authCredentials          *auth.Credentials
-	iamLoginTokenProvider    auth.TokenProvider
-	apiTokenProvider         auth.TokenProvider
-	useragents               []string
-	setAdminAPIEndpoint      bool
-	setCredentials           bool
-	setHTTPClient            bool
-	setTokenSource           bool
-	setIAMAuthNTokenSource   bool
-	resolver                 instance.ConnectionNameResolver
-	failoverPeriod           time.Duration
-	metadataExchangeDisabled bool
-	dnsResolver              cloudsql.NetResolver
-	sqlDataDialer            sqldataclient.Dialer
-	sqlDataStreamTimeout     time.Duration
+	rsaKey                          *rsa.PrivateKey
+	sqladminOpts                    []apiopt.ClientOption
+	dialOpts                        []DialOption
+	dialFunc                        func(ctx context.Context, network, addr string) (net.Conn, error)
+	refreshTimeout                  time.Duration
+	useIAMAuthN                     bool
+	logger                          debug.ContextLogger
+	lazyRefresh                     bool
+	sqlDataEndpoint                 string
+	clientUniverseDomain            string
+	quotaProject                    string
+	authCredentials                 *auth.Credentials
+	iamLoginTokenProvider           auth.TokenProvider
+	apiTokenProvider                auth.TokenProvider
+	useragents                      []string
+	setAdminAPIEndpoint             bool
+	setCredentials                  bool
+	setHTTPClient                   bool
+	setTokenSource                  bool
+	setIAMAuthNTokenSource          bool
+	resolver                        instance.ConnectionNameResolver
+	failoverPeriod                  time.Duration
+	metadataExchangeDisabled        bool
+	dnsResolver                     cloudsql.NetResolver
+	sqlDataDialer                   sqldataclient.Dialer
+	sqlDataStreamTimeout            time.Duration
+	resourceExhaustedCooldownPeriod time.Duration
+	useDNSNameResolver              bool
 	// err tracks any dialer options that may have failed.
-	err error
+	err    error
+	client *sqladmin.Service
 }
 
 // WithOptions turns a list of Option's into a single Option.
@@ -82,6 +85,13 @@ func WithOptions(opts ...Option) Option {
 func WithSQLDataStreamTimeout(timeout time.Duration) Option {
 	return func(d *dialerConfig) {
 		d.sqlDataStreamTimeout = timeout
+	}
+}
+
+// WithResourceExhaustedCooldownPeriod sets the cooldown period after a ResourceExhausted error.
+func WithResourceExhaustedCooldownPeriod(period time.Duration) Option {
+	return func(d *dialerConfig) {
+		d.resourceExhaustedCooldownPeriod = period
 	}
 }
 
@@ -332,7 +342,7 @@ func WithResolver(r instance.ConnectionNameResolver) Option {
 //   - Value: `my-project:region:my-instance` – This is the instance name
 func WithDNSResolver() Option {
 	return func(d *dialerConfig) {
-		d.resolver = cloudsql.NewDNSResolver(d.dnsResolver)
+		d.useDNSNameResolver = true
 	}
 }
 
@@ -424,6 +434,8 @@ type dialConfig struct {
 	tcpKeepAlive          time.Duration
 	useIAMAuthN           bool
 	mdxClientProtocolType string
+	// This will be set before options
+	client *sqladmin.Service
 }
 
 // DialOptions turns a list of DialOption instances into an DialOption.
