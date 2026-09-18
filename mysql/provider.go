@@ -873,6 +873,7 @@ func serverVersion(db *sql.DB) (*version.Version, error) {
 	}
 
 	versionString = strings.SplitN(versionString, ":", 2)[0]
+	versionString = strings.SplitN(versionString, "-", 2)[0]
 	return version.NewVersion(versionString)
 }
 
