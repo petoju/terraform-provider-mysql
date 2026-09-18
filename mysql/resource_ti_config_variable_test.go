@@ -158,6 +158,8 @@ func getGetInstance(varType string, t *testing.T) string {
 		t.Skip("Skip on MySQL")
 	}
 
+	testAccPreCheck(t)
+
 	ctx := context.Background()
 	db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
 	if err != nil {
