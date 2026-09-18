@@ -106,7 +106,7 @@ type PdServerKeys struct {
 
 type PdReplicationModeKeys struct {
 	// Sets the backup mode
-	ReplicationMode string `json:"replication-mode" default:"IGNOREDESTROY"`
+	ReplicationMode string `json:"replication-mode" default:"IGNOREONDESTROY#"`
 }
 
 type TiKvConfigurationKeys struct {
@@ -141,7 +141,7 @@ type tikvGcKeys struct {
 	// The number of keys processed in one batch
 	BatchKeys int64 `json:"batch-keys" default:"0"`
 	// The maximum bytes that can be written into RocksDB per second
-	MaxWriteBytesPerSec int64 `json:"max-write-bytes-per-sec" default:"1KB"`
+	MaxWriteBytesPerSec string `json:"max-write-bytes-per-sec" default:"1KB"`
 	// Whether to enable compaction filter
 	EnableCompactionFilter bool `json:"enable-compaction-filter" default:"true"`
 	// Whether to skip the cluster version check of compaction filter (not released)
@@ -154,15 +154,15 @@ type tikvServerKeys struct {
 	// Sets the maximum length of a gRPC message that can be sent
 	MaxGrpcSendMsgLen int64 `json:"max-grpc-send-msg-len" default:"10485760"`
 	// Sets the maximum number of Raft messages that are contained in a single gRPC message
-	RaftMsgMaxBatchSize int64 `json:"raft-msg-max-batch-size" default:"IGNOREONDESTROY#"`
+	RaftMsgMaxBatchSize string `json:"raft-msg-max-batch-size" default:"IGNOREONDESTROY#"`
 }
 type tikvDbGlobalCfgKeys struct {
 	// The maximum size of total WAL
-	MaxTotalWalSize int64 `json:"max-total-wal-size" default:"IGNOREONDESTROY#"`
+	MaxTotalWalSize string `json:"max-total-wal-size" default:"IGNOREONDESTROY#"`
 	// The number of background threads in RocksDB
-	MaxBackgroundJobs int64 `json:"max-background-jobs" default:"IGNOREONDESTROY#[max(2, min({number_of_cores}-1,9))]"`
+	MaxBackgroundJobs string `json:"max-background-jobs" default:"IGNOREONDESTROY#[max(2, min({number_of_cores}-1,9))]"`
 	// The maximum number of flush threads in RocksDB
-	MaxBackgroundFlushes int64 `json:"max-background-flushes" default:"IGNOREONDESTROY#[(max-background-jobs + 3)/4]"`
+	MaxBackgroundFlushes string `json:"max-background-flushes" default:"IGNOREONDESTROY#[(max-background-jobs + 3)/4]"`
 	// The total number of files that RocksDB can open
 	MaxOpenFiles int64 `json:"max-open-files" default:"40960"`
 	// The size of readahead during compaction
@@ -188,7 +188,7 @@ type tikvDbCfgKeys struct {
 	// The size of the target file at base level
 	TargetFileSizeBase string `json:"target-file-size-base" default:"8MB"`
 	// The maximum number of files at L0 that trigger compaction
-	Level0FileNumCompactionTrigger int64 `json:"level0-file-num-compaction-trigger" default:"IGNOREONDESTROY#[{'defaultcf': 4, 'writecf': 4, 'lockcf': 1}]"`
+	Level0FileNumCompactionTrigger string `json:"level0-file-num-compaction-trigger" default:"IGNOREONDESTROY#[{'defaultcf': 4, 'writecf': 4, 'lockcf': 1}]"`
 	// The maximum number of files at L0 that trigger write stall
 	Level0SlowdownWritesTrigger int64 `json:"level0-slowdown-writes-trigger" default:"20"`
 	// The maximum number of files at L0 that completely block write
@@ -249,12 +249,12 @@ type tikvReadpoolKeys struct {
 
 type tikvReadpoolUnified struct {
 	//The maximum number of threads in the thread pool that uniformly processes read requests, which is the size of the UnifyReadPool thread pool
-	MaxThreadCount int64 `json:"max-thread-count" default:"IGNOREONDESTROY#[MAX(4, cpu_count * 0.8)]"`
+	MaxThreadCount string `json:"max-thread-count" default:"IGNOREONDESTROY#[MAX(4, cpu_count * 0.8)]"`
 }
 
 type tikvBackupKeys struct {
 	// The number of backup threads (supported since v4.0.3)
-	NumThreads int64 `json:"num-threads" default:"IGNOREONDESTROY#[MIN(CPU * 0.5, 8)]"`
+	NumThreads string `json:"num-threads" default:"IGNOREONDESTROY#[MIN(CPU * 0.5, 8)]"`
 }
 
 type tikvRaftstoreKeys struct {
@@ -265,9 +265,9 @@ type tikvRaftstoreKeys struct {
 	// The soft limit on the maximum allowable number of residual Raft logs
 	RaftLogGcThreshold int64 `json:"raft-log-gc-threshold" default:"50"`
 	// The hard limit on the allowable number of residual Raft logs
-	RaftLogGcCountLimit int64 `json:"raft-log-gc-count-limit" default:"IGNOREONDESTROY#the log number that can be accommodated in the 3/4 Region size (calculated as 1MB for each log)"`
+	RaftLogGcCountLimit string `json:"raft-log-gc-count-limit" default:"IGNOREONDESTROY#the log number that can be accommodated in the 3/4 Region size (calculated as 1MB for each log)"`
 	// The hard limit on the allowable size of residual Raft logs
-	RaftLogGcSizeLimit int64 `json:"raft-log-gc-size-limit" default:"IGNOREONDESTROY#[region_size*3/4]"`
+	RaftLogGcSizeLimit string `json:"raft-log-gc-size-limit" default:"IGNOREONDESTROY#[region_size*3/4]"`
 	// The soft limit on the size of a single message packet that is allowed to be generated
 	RaftMaxSizePerMsg string `json:"raft-max-size-per-msg" default:"1MB"`
 	// The hard limit on the maximum size of a single Raft log
@@ -327,7 +327,7 @@ type tikvRaftstoreKeys struct {
 	// Raft state machines process data write requests in batches by the BatchSystem. This configuration item specifies the maximum number of Raft state machines that can execute the requests in one batch.
 	ApplyMaxBatchSize int64 `json:"apply-max-batch-size" default:"256"`
 	// Raft state machines process requests for flushing logs into the disk in batches by the BatchSystem. This configuration item specifies the maximum number of Raft state machines that can process the requests in one batch.
-	StoreMaxBatchSize int64 `json:"store-max-batch-size" default:"IGNOREONDESTROY#If hibernate-regions is enabled, the default value is 256. If hibernate-regions is disabled, the default value is 1024."`
+	StoreMaxBatchSize string `json:"store-max-batch-size" default:"IGNOREONDESTROY#If hibernate-regions is enabled, the default value is 256. If hibernate-regions is disabled, the default value is 1024."`
 }
 
 type tikvCoprocessorKeys struct {
