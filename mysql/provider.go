@@ -327,6 +327,7 @@ func Provider() *schema.Provider {
 			"mysql_database":             resourceDatabase(),
 			"mysql_global_variable":      resourceGlobalVariable(),
 			"mysql_grant":                resourceGrant(),
+			"mysql_procedure":            resourceProcedure(),
 			"mysql_role":                 resourceRole(),
 			"mysql_sql":                  resourceSql(),
 			"mysql_user_password":        resourceUserPassword(),
