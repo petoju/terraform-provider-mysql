@@ -29,6 +29,8 @@ import (
 	"golang.org/x/net/proxy"
 	"golang.org/x/oauth2"
 
+	gcpAuth "cloud.google.com/go/auth"
+	gcpImpersonate "cloud.google.com/go/auth/credentials/impersonate"
 	"cloud.google.com/go/cloudsqlconn"
 	cloudsql "cloud.google.com/go/cloudsqlconn/mysql/mysql"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -54,6 +56,20 @@ const (
 	azEnvChina              = "china"
 	azEnvGerman             = "german"
 	azEnvUSGovernment       = "usgovernment"
+	gcpScopeAdmin           = "https://www.googleapis.com/auth/sqlservice.admin"
+	gcpScopeLogin           = "https://www.googleapis.com/auth/sqlservice.login"
+)
+
+// Named after both steps of a Cloud SQL connection: the credentials used for
+// the Cloud SQL Admin API, and the MySQL login that follows.
+type cloudsqlAuthMode int
+
+const (
+	cloudsqlADCPassword          cloudsqlAuthMode = iota // default credentials, MySQL native password
+	cloudsqlADCIAM                                       // default credentials, IAM login
+	cloudsqlImpersonatedPassword                         // impersonated service account, MySQL native password
+	cloudsqlImpersonatedIAM                              // impersonated service account, IAM login
+	cloudsqlTokenIAM                                     // access token from the password field, IAM login
 )
 
 type DbConnection struct {
@@ -216,6 +232,16 @@ func Provider() *schema.Provider {
 				Type:     schema.TypeBool,
 				Optional: true,
 				Default:  false,
+			},
+			"gcp_impersonate_service_account": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("MYSQL_GCP_IMPERSONATE_SERVICE_ACCOUNT", ""),
+				Description: "Service account to impersonate when authenticating to GCP CloudSQL. Only applies to cloudsql:// endpoints.",
+				ValidateFunc: validation.StringMatch(
+					gcpServiceAccountEmailRegexp,
+					"must be a service account email address, e.g. name@project.iam.gserviceaccount.com",
+				),
 			},
 			"aws_config": {
 				Type:     schema.TypeList,
@@ -402,6 +428,104 @@ func buildAwsConfig(ctx context.Context, awsConfigBlock []interface{}) (aws.Conf
 	return baseConfig, nil
 }
 
+// Empty is allowed for the unset default.
+var gcpServiceAccountEmailRegexp = regexp.MustCompile(`^$|^[^@\s]+@[^@\s]+\.gserviceaccount\.com$`)
+
+func cloudsqlAuth(iamAuth bool, impersonateServiceAccount, password string) cloudsqlAuthMode {
+	if iamAuth {
+		switch {
+		case impersonateServiceAccount != "":
+			return cloudsqlImpersonatedIAM
+		case password != "":
+			return cloudsqlTokenIAM
+		default:
+			return cloudsqlADCIAM
+		}
+	}
+
+	if impersonateServiceAccount != "" {
+		return cloudsqlImpersonatedPassword
+	}
+	return cloudsqlADCPassword
+}
+
+// With impersonation and IAM the identity comes from the client certificate,
+// so a leftover password is dropped instead of being sent.
+func cloudsqlDsnPassword(mode cloudsqlAuthMode, password string) string {
+	if mode == cloudsqlImpersonatedIAM {
+		if password != "" {
+			log.Printf("[WARN] password is ignored when gcp_impersonate_service_account is used with iam_database_authentication")
+		}
+		return ""
+	}
+	return password
+}
+
+// Takes no context on purpose: the one from providerConfigure is cancelled
+// long before these credentials refresh their first token.
+func gcpImpersonatedCredentials(targetServiceAccount string, scopes ...string) (*gcpAuth.Credentials, error) {
+	creds, err := gcpImpersonate.NewCredentials(&gcpImpersonate.CredentialsOptions{
+		TargetPrincipal: targetServiceAccount,
+		Scopes:          scopes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed creating credentials impersonating %s: %w", targetServiceAccount, err)
+	}
+	return creds, nil
+}
+
+func cloudsqlOptions(mode cloudsqlAuthMode, impersonateServiceAccount, password string, privateIp bool) ([]cloudsqlconn.Option, error) {
+	var dialOpts []cloudsqlconn.DialOption
+	if privateIp {
+		dialOpts = append(dialOpts, cloudsqlconn.WithPrivateIP())
+	}
+	opts := []cloudsqlconn.Option{cloudsqlconn.WithDefaultDialOptions(dialOpts...)}
+
+	switch mode {
+	case cloudsqlImpersonatedIAM:
+		apiCredentials, err := gcpImpersonatedCredentials(impersonateServiceAccount, gcpScopeAdmin)
+		if err != nil {
+			return nil, err
+		}
+		loginCredentials, err := gcpImpersonatedCredentials(impersonateServiceAccount, gcpScopeLogin)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts,
+			cloudsqlconn.WithIAMAuthN(),
+			cloudsqlconn.WithIAMAuthNCredentials(apiCredentials, loginCredentials),
+		)
+
+	case cloudsqlTokenIAM:
+		// The connector caps the certificate at the token expiry, so assume
+		// the usual hour: a zero expiry refreshes it on every dial.
+		token := oauth2.StaticTokenSource(&oauth2.Token{
+			AccessToken: password,
+			Expiry:      time.Now().Add(time.Hour),
+		})
+		opts = append(opts,
+			cloudsqlconn.WithIAMAuthN(),
+			cloudsqlconn.WithIAMAuthNTokenSources(token, token),
+		)
+
+	case cloudsqlADCIAM:
+		// The connector detects and scopes default credentials itself.
+		opts = append(opts, cloudsqlconn.WithIAMAuthN())
+
+	case cloudsqlImpersonatedPassword:
+		apiCredentials, err := gcpImpersonatedCredentials(impersonateServiceAccount, gcpScopeAdmin)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, cloudsqlconn.WithCredentials(apiCredentials))
+
+	case cloudsqlADCPassword:
+		// Nothing to add, the connector falls back to default credentials.
+	}
+
+	return opts, nil
+}
+
 func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	var endpoint = d.Get("endpoint").(string)
 	var connParams = make(map[string]string)
@@ -412,9 +536,15 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var password = d.Get("password").(string)
 	var iamAuth = d.Get("iam_database_authentication").(bool)
 	var privateIp = d.Get("private_ip").(bool)
+	var impersonateServiceAccount = d.Get("gcp_impersonate_service_account").(string)
 	var tlsConfig = d.Get("tls").(string)
 	var tlsConfigStruct *tls.Config
 	configKey := "default"
+
+	if impersonateServiceAccount != "" && !strings.HasPrefix(endpoint, "cloudsql://") {
+		log.Printf("[WARN] gcp_impersonate_service_account only applies to cloudsql:// endpoints, ignoring it")
+		impersonateServiceAccount = ""
+	}
 
 	// Read AWS config settings
 	var awsRdsIamAuth bool
@@ -522,30 +652,20 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 
 	} else if strings.HasPrefix(endpoint, "cloudsql://") {
-		proto = "cloudsql"
 		endpoint = strings.ReplaceAll(endpoint, "cloudsql://", "")
-		var err error
-		if iamAuth { // Access token will be in the password field
 
-			var opts []cloudsqlconn.Option
-
-			token := oauth2.StaticTokenSource(&oauth2.Token{
-				AccessToken: password,
-			})
-			opts = append(opts, cloudsqlconn.WithIAMAuthN())
-			opts = append(opts, cloudsqlconn.WithIAMAuthNTokenSources(token, token))
-			_, err = cloudsql.RegisterDriver("cloudsql", opts...)
-		} else {
-			var endpointParams []cloudsqlconn.DialOption
-			if privateIp {
-				endpointParams = append(endpointParams, cloudsqlconn.WithPrivateIP())
-			}
-
-			_, err = cloudsql.RegisterDriver("cloudsql", cloudsqlconn.WithDefaultDialOptions(endpointParams...))
-		}
+		authMode := cloudsqlAuth(iamAuth, impersonateServiceAccount, password)
+		opts, err := cloudsqlOptions(authMode, impersonateServiceAccount, password, privateIp)
 		if err != nil {
+			return nil, diag.FromErr(err)
+		}
+
+		proto = "cloudsql"
+		if _, err := cloudsql.RegisterDriver(proto, opts...); err != nil {
 			return nil, diag.Errorf("failed to register driver %v", err)
 		}
+
+		password = cloudsqlDsnPassword(authMode, password)
 
 	} else if strings.HasPrefix(endpoint, "azure://") {
 		var azCredential azcore.TokenCredential
