@@ -191,12 +191,11 @@ provider "mysql" {
 
 ### GCP CloudSQL Connection
 
-For connections to GCP hosted instances, the provider can connect through the Cloud SQL MySQL library.
-
-To enable Cloud SQL MySQL library, add `cloudsql://` to the endpoint `Network type` DSN string and connection name of the instance in following format: `project/region/instance` (or `project:region:instance`).
+To connect to a Cloud SQL instance, prefix the endpoint with `cloudsql://` followed by the instance
+connection name, in the format `project:region:instance` (or `project/region/instance`). The provider
+then reaches the instance through the Cloud SQL Go connector instead of dialing a host directly.
 
 ```hcl
-# Configure the MySQL provider for CloudSQL Mysql
 provider "mysql" {
   endpoint = "cloudsql://project:region:instance"
   username = "app-user"
@@ -204,19 +203,106 @@ provider "mysql" {
 }
 ```
 
-For a connection to an instance with no public IP add the `private_ip` option to the provider configuration.
+Every connection authenticates twice, and the two are configured independently:
+
+1. **Cloud SQL Admin API**, to obtain the certificate used to reach the instance.
+2. **MySQL**, to log in to the database itself.
+
+#### Authenticating to Cloud SQL Admin API
+
+Whichever principal is used here needs `roles/cloudsql.client`.
+
+By default the provider uses the [application default credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
+of the environment it runs in: `GOOGLE_APPLICATION_CREDENTIALS`, a `gcloud auth application-default
+login` session, or the identity of the VM, GKE pod or Cloud Run service.
+
+Set `gcp_impersonate_service_account` to a service account email to impersonate it instead. The
+environment credentials are then only used to mint tokens for that service account, and those tokens
+are refreshed automatically. Use this when the identity running Terraform may not connect to the
+instance itself:
 
 ```hcl
-# Configure the MySQL provider for CloudSQL Mysql
 provider "mysql" {
   endpoint = "cloudsql://project:region:instance"
+
   username = "app-user"
   password = "app-password"
-  private_ip = true
+
+  gcp_impersonate_service_account = "connector-sa@project-id.iam.gserviceaccount.com"
 }
 ```
 
-See also: [Authentication at Google](https://cloud.google.com/docs/authentication#service-accounts).
+This requires `roles/iam.serviceAccountTokenCreator` on the service account for the principal running
+Terraform. It only applies to `cloudsql://` endpoints and is ignored elsewhere.
+
+#### Authenticating to MySQL
+
+By default `username` and `password` are an ordinary MySQL user, as in the first example.
+
+Set `iam_database_authentication = true` to log in with an IAM principal instead. The identity is
+carried by the client certificate, so no password is involved. The instance needs the
+`cloudsql_iam_authentication` flag, and the identity needs `roles/cloudsql.instanceUser` and a
+database user created for it.
+
+`username` is the identity without the `@` and the domain, so
+`sa-name@project-id.iam.gserviceaccount.com` logs in as `sa-name`.
+
+Which identity logs in follows from the Cloud SQL Admin API side:
+
+```hcl
+# The impersonated service account
+provider "mysql" {
+  endpoint = "cloudsql://project:region:instance"
+
+  iam_database_authentication = true
+  username                    = "sa-name"
+
+  gcp_impersonate_service_account = "sa-name@project-id.iam.gserviceaccount.com"
+}
+```
+
+```hcl
+# The environment's own identity, when it is a database user itself
+provider "mysql" {
+  endpoint = "cloudsql://project:region:instance"
+
+  iam_database_authentication = true
+  username                    = "runner-sa"
+}
+```
+
+An access token may also be supplied in `password`, in which case it is used for both the Admin API
+and the database login, and the identity is the one the token belongs to:
+
+```hcl
+provider "mysql" {
+  endpoint                    = "cloudsql://project:region:instance"
+  iam_database_authentication = true
+  username                    = "sa-name"
+  password                    = var.access_token # gcloud auth print-access-token
+}
+```
+
+This is the original form of IAM authentication and is kept for compatibility. The token does not
+refresh, so runs lasting longer than its lifetime fail part way through, and it must be broadly
+scoped because it also serves the Admin API. It remains useful in one case: it is the only setup
+that needs no application default credentials at all.
+
+#### Supported combinations
+
+| Cloud SQL Admin API | MySQL | Configuration |
+|---|---|---|
+| Environment credentials | MySQL user | `username` + `password` |
+| Environment credentials | The environment's own identity | `iam_database_authentication = true` |
+| Environment credentials | Owner of a supplied access token | `iam_database_authentication = true` + token in `password` |
+| Impersonated service account | MySQL user | `gcp_impersonate_service_account` + `username`/`password` |
+| Impersonated service account | The same service account | `gcp_impersonate_service_account` + `iam_database_authentication = true` |
+
+See also:
+
+- [Authentication at Google](https://cloud.google.com/docs/authentication#service-accounts)
+- [Roles for service account authentication](https://cloud.google.com/iam/docs/service-account-permissions)
+- [Cloud SQL IAM logins](https://cloud.google.com/sql/docs/mysql/iam-logins)
 
 ### Azure MySQL server with AzureAD auth enabled connection
 
@@ -280,8 +366,9 @@ The following arguments are supported:
 - `max_open_conns` - (Optional) Sets the maximum number of open connections to the database. If n <= 0, then there is no limit on the number of open connections.
 - `conn_params` - (Optional) Sets extra mysql connection parameters (ODBC parameters). Most useful for session variables such as `default_storage_engine`, `foreign_key_checks` or `sql_log_bin`.
 - `authentication_plugin` - (Optional) Sets the authentication plugin, it can be one of the following: `native` or `cleartext`. Defaults to `native`.
-- `iam_database_authentication` - (Optional) For Cloud SQL databases, it enabled the use of IAM authentication. Make sure to declare the `password` field with a temporary OAuth2 token of the user that will connect to the MySQL server.
+- `iam_database_authentication` - (Optional) For Cloud SQL databases, log in to the database with a Google identity instead of a MySQL password. The identity is the impersonated service account if `gcp_impersonate_service_account` is set, the owner of the access token if one is given in `password`, and otherwise the application default credentials of the environment. See [Authenticating to MySQL](#authenticating-to-mysql).
 - `private_ip` - (Optional) Whether to use a connection to an instance with a private ip. Defaults to `false`. This argument only applies to CloudSQL and is ignored elsewhere.
+- `gcp_impersonate_service_account` - (Optional) Email of the service account to impersonate when authenticating to Cloud SQL, can also be sourced from the `MYSQL_GCP_IMPERSONATE_SERVICE_ACCOUNT` environment variable. This argument only applies to CloudSQL and is ignored elsewhere. See [Authenticating to Cloud SQL Admin API](#authenticating-to-cloud-sql-admin-api).
 - `azure_config` - (Optional) Sets the Azure configuration for the connection. This is a block containing the following arguments:
   - `client_id` - (Optional) The client ID for the Azure AD application. Can also be sourced from the `AZURE_CLIENT_ID` or `ARM_CLIENT_ID` environment variables.
   - `client_secret` - (Optional) The client secret for the Azure AD application. Can also be sourced from the `AZURE_CLIENT_SECRET` or `ARM_CLIENT_SECRET` environment variables.
