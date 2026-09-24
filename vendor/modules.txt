@@ -229,7 +229,7 @@ github.com/aws/aws-sdk-go-v2/service/ssooidc/types
 github.com/aws/aws-sdk-go-v2/service/sts
 github.com/aws/aws-sdk-go-v2/service/sts/internal/endpoints
 github.com/aws/aws-sdk-go-v2/service/sts/types
-# github.com/aws/smithy-go v1.28.1
+# github.com/aws/smithy-go v1.28.2
 ## explicit; go 1.24
 github.com/aws/smithy-go
 github.com/aws/smithy-go/auth
@@ -344,8 +344,8 @@ github.com/google/uuid
 ## explicit; go 1.25.0
 github.com/googleapis/enterprise-certificate-proxy/client
 github.com/googleapis/enterprise-certificate-proxy/client/util
-# github.com/googleapis/gax-go/v2 v2.24.1
-## explicit; go 1.25.0
+# github.com/googleapis/gax-go/v2 v2.26.0
+## explicit; go 1.26.0
 github.com/googleapis/gax-go/v2
 github.com/googleapis/gax-go/v2/apierror
 github.com/googleapis/gax-go/v2/apierror/internal/proto
@@ -388,8 +388,8 @@ github.com/hashicorp/go-plugin/runner
 # github.com/hashicorp/go-retryablehttp v0.7.8
 ## explicit; go 1.23
 github.com/hashicorp/go-retryablehttp
-# github.com/hashicorp/go-uuid v1.0.3
-## explicit
+# github.com/hashicorp/go-uuid v1.0.4
+## explicit; go 1.25.13
 github.com/hashicorp/go-uuid
 # github.com/hashicorp/go-version v1.9.0
 ## explicit
@@ -695,8 +695,8 @@ golang.org/x/tools/internal/pkgbits
 golang.org/x/tools/internal/stdlib
 golang.org/x/tools/internal/typesinternal
 golang.org/x/tools/internal/versions
-# google.golang.org/api v0.298.0
-## explicit; go 1.25.0
+# google.golang.org/api v0.299.0
+## explicit; go 1.26.0
 google.golang.org/api/googleapi
 google.golang.org/api/googleapi/transport
 google.golang.org/api/internal
@@ -724,14 +724,14 @@ google.golang.org/appengine/internal/datastore
 google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/modules
 google.golang.org/appengine/internal/remote_api
-# google.golang.org/genproto v0.0.0-20260917231906-eeb232e0883d
+# google.golang.org/genproto v0.0.0-20260921155816-b14227669459
 ## explicit; go 1.26.0
 google.golang.org/genproto/googleapis/type/interval
-# google.golang.org/genproto/googleapis/api v0.0.0-20260917231906-eeb232e0883d
+# google.golang.org/genproto/googleapis/api v0.0.0-20260921155816-b14227669459
 ## explicit; go 1.26.0
 google.golang.org/genproto/googleapis/api
 google.golang.org/genproto/googleapis/api/annotations
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20260917231906-eeb232e0883d
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459
 ## explicit; go 1.26.0
 google.golang.org/genproto/googleapis/rpc/code
 google.golang.org/genproto/googleapis/rpc/errdetails
