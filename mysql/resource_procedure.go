@@ -54,11 +54,12 @@ func resourceProcedure() *schema.Resource {
 			},
 
 			"definer": {
-				Type:      schema.TypeString,
-				Optional:  true,
-				Computed:  true,
-				ForceNew:  true,
-				StateFunc: normalizeDefiner,
+				Type:         schema.TypeString,
+				Optional:     true,
+				Computed:     true,
+				ForceNew:     true,
+				StateFunc:    normalizeDefiner,
+				ValidateFunc: validateDefiner,
 			},
 
 			"parameter": {
@@ -618,8 +619,17 @@ func splitDefiner(definer string) (string, string, error) {
 	return user, host, nil
 }
 
+func validateDefiner(v interface{}, k string) ([]string, []error) {
+	if _, _, err := splitDefiner(v.(string)); err != nil {
+		return nil, []error{fmt.Errorf("%s: %w", k, err)}
+	}
+	return nil, nil
+}
+
 // normalizeDefiner strips the optional quoting around both definer parts so
-// that the configured value matches what the server reports back.
+// that the configured value matches what the server reports back. A StateFunc
+// cannot fail; malformed input is rejected by validateDefiner at plan time, so
+// the fallback only passes through the empty value of an unset definer.
 func normalizeDefiner(definer interface{}) string {
 	user, host, err := splitDefiner(definer.(string))
 	if err != nil {

@@ -117,6 +117,45 @@ func TestAccProcedure_noParameters(t *testing.T) {
 	})
 }
 
+func TestAccProcedure_definerAndParameterTypes(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccProcedureCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProcedureConfigDefinerAndParameterTypes,
+				Check: resource.ComposeTestCheckFunc(
+					testAccProcedureExists("mysql_procedure.test"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "definer", "tf_procedure_definer@localhost"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.#", "2"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.0.mode", "IN"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.0.name", "choice"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.0.type", "ENUM('a','b')"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.1.mode", "INOUT"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.1.name", "counter"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.1.type", "INT"),
+					testAccProcedureCharacteristics("tf_test_procedure", "pick", map[string]string{
+						"DEFINER": "tf_procedure_definer@localhost",
+						// Windows line endings are stored verbatim.
+						"ROUTINE_DEFINITION": "BEGIN\r\n  IF choice = 'a' THEN\r\n    SET counter = counter + 1;\r\n  END IF;\r\nEND",
+					}),
+				),
+			},
+			{
+				Config:            testAccProcedureConfigDefinerAndParameterTypes,
+				ResourceName:      "mysql_procedure.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     "tf_test_procedure.pick",
+			},
+		},
+	})
+}
+
 func testAccProcedureExists(rn string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]
@@ -419,6 +458,29 @@ func TestNormalizeDefiner(t *testing.T) {
 	}
 }
 
+// TestValidateDefiner covers rejecting malformed definers; needs no database.
+func TestValidateDefiner(t *testing.T) {
+	testCases := []struct {
+		definer     string
+		expectError bool
+	}{
+		{definer: "root@localhost"},
+		{definer: "`root`@`%`"},
+		{definer: "root", expectError: true},
+		{definer: "@localhost", expectError: true},
+		{definer: "root@", expectError: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.definer, func(t *testing.T) {
+			_, errs := validateDefiner(tc.definer, "definer")
+			if tc.expectError != (len(errs) > 0) {
+				t.Fatalf("expected error: %v, got %v", tc.expectError, errs)
+			}
+		})
+	}
+}
+
 const testAccProcedureConfigBasic = `
 resource "mysql_database" "test" {
   name = "tf_test_procedure"
@@ -511,6 +573,36 @@ resource "mysql_procedure" "test" {
       SET greeting = CONCAT('Hi, ', person);
     END
   SQL
+}
+`
+
+const testAccProcedureConfigDefinerAndParameterTypes = `
+resource "mysql_database" "test" {
+  name = "tf_test_procedure"
+}
+
+resource "mysql_user" "definer" {
+  user = "tf_procedure_definer"
+  host = "localhost"
+}
+
+resource "mysql_procedure" "test" {
+  database = mysql_database.test.name
+  name     = "pick"
+  definer  = "${mysql_user.definer.user}@${mysql_user.definer.host}"
+
+  parameter {
+    name = "choice"
+    type = "ENUM('a','b')"
+  }
+
+  parameter {
+    mode = "INOUT"
+    name = "counter"
+    type = "INT"
+  }
+
+  body = "BEGIN\r\n  IF choice = 'a' THEN\r\n    SET counter = counter + 1;\r\n  END IF;\r\nEND"
 }
 `
 
