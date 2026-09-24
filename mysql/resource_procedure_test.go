@@ -130,7 +130,7 @@ func TestAccProcedure_definerAndParameterTypes(t *testing.T) {
 				Config: testAccProcedureConfigDefinerAndParameterTypes,
 				Check: resource.ComposeTestCheckFunc(
 					testAccProcedureExists("mysql_procedure.test"),
-					resource.TestCheckResourceAttr("mysql_procedure.test", "definer", "tf_procedure_definer@localhost"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "definer", "tf_proc_definer@localhost"),
 					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.#", "2"),
 					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.0.mode", "IN"),
 					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.0.name", "choice"),
@@ -139,7 +139,7 @@ func TestAccProcedure_definerAndParameterTypes(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.1.name", "counter"),
 					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.1.type", "INT"),
 					testAccProcedureCharacteristics("tf_test_procedure", "pick", map[string]string{
-						"DEFINER": "tf_procedure_definer@localhost",
+						"DEFINER": "tf_proc_definer@localhost",
 						// Windows line endings are stored verbatim.
 						"ROUTINE_DEFINITION": "BEGIN\r\n  IF choice = 'a' THEN\r\n    SET counter = counter + 1;\r\n  END IF;\r\nEND",
 					}),
@@ -582,7 +582,7 @@ resource "mysql_database" "test" {
 }
 
 resource "mysql_user" "definer" {
-  user = "tf_procedure_definer"
+  user = "tf_proc_definer"
   host = "localhost"
 }
 
