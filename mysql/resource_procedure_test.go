@@ -156,6 +156,36 @@ func TestAccProcedure_definerAndParameterTypes(t *testing.T) {
 	})
 }
 
+func TestAccProcedure_escapedQuotes(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccProcedureCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				// ROUTINE_DEFINITION unescapes string literals, so the body must
+				// be read back from SHOW CREATE PROCEDURE to avoid a diff.
+				Config: testAccProcedureConfigEscapedQuotes,
+				Check: resource.ComposeTestCheckFunc(
+					testAccProcedureExists("mysql_procedure.test"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "body",
+						"BEGIN\n  SET message = CONCAT('it''s ', \"a \"\"quoted\"\" \", 'back\\'slash');\nEND"),
+				),
+			},
+			{
+				Config:            testAccProcedureConfigEscapedQuotes,
+				ResourceName:      "mysql_procedure.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     "tf_test_procedure.quote",
+			},
+		},
+	})
+}
+
 func testAccProcedureExists(rn string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]
@@ -291,7 +321,87 @@ func TestExtractProcedureParameterList(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := extractProcedureParameterList(tc.createStmt)
+			got, _, err := extractProcedureParameterList(tc.createStmt)
+
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected an error, got %q", got)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, got)
+			}
+		})
+	}
+}
+
+// TestExtractProcedureBody covers pulling the routine body out of a CREATE
+// PROCEDURE statement; needs no database. The statements mirror SHOW CREATE
+// PROCEDURE output, which is formatted alike by MySQL 5.6 to 8.4 and MariaDB.
+func TestExtractProcedureBody(t *testing.T) {
+	testCases := []struct {
+		name        string
+		createStmt  string
+		expected    string
+		expectError bool
+	}{
+		{
+			name:       "no characteristics",
+			createStmt: "CREATE DEFINER=`root`@`localhost` PROCEDURE `p`()\nSELECT 'x''y'",
+			expected:   "SELECT 'x''y'",
+		},
+		{
+			name: "all characteristics",
+			createStmt: "CREATE DEFINER=`root`@`localhost` PROCEDURE `p`(IN p_x VARCHAR(10))\n" +
+				"    READS SQL DATA\n" +
+				"    DETERMINISTIC\n" +
+				"    SQL SECURITY INVOKER\n" +
+				"    COMMENT 'it''s a (tricky) comment'\n" +
+				"BEGIN\n  SET @s = CONCAT('a''b', 'c\\'d', \"e\"\"f\");\nEND",
+			expected: "BEGIN\n  SET @s = CONCAT('a''b', 'c\\'d', \"e\"\"f\");\nEND",
+		},
+		{
+			name: "characteristics in any order and case",
+			createStmt: "CREATE PROCEDURE `p`() comment \"c\" language sql not deterministic " +
+				"no sql sql security definer contains sql modifies sql data SELECT 1",
+			expected: "SELECT 1",
+		},
+		{
+			name:       "label named like a characteristic",
+			createStmt: "CREATE PROCEDURE `p`()\n    NO SQL\ncomment: BEGIN\nEND",
+			expected:   "comment: BEGIN\nEND",
+		},
+		{
+			name:       "windows line endings",
+			createStmt: "CREATE PROCEDURE `p`()\r\n    DETERMINISTIC\r\nBEGIN\r\n  SELECT 1;\r\nEND",
+			expected:   "BEGIN\r\n  SELECT 1;\r\nEND",
+		},
+		{
+			name:        "no body",
+			createStmt:  "CREATE PROCEDURE `p`()\n    DETERMINISTIC",
+			expectError: true,
+		},
+		{
+			name:        "unterminated comment",
+			createStmt:  "CREATE PROCEDURE `p`() COMMENT 'c",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, remainder, err := extractProcedureParameterList(tc.createStmt)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			got, err := extractProcedureBody(remainder)
 
 			if tc.expectError {
 				if err == nil {
@@ -603,6 +713,29 @@ resource "mysql_procedure" "test" {
   }
 
   body = "BEGIN\r\n  IF choice = 'a' THEN\r\n    SET counter = counter + 1;\r\n  END IF;\r\nEND"
+}
+`
+
+const testAccProcedureConfigEscapedQuotes = `
+resource "mysql_database" "test" {
+  name = "tf_test_procedure"
+}
+
+resource "mysql_procedure" "test" {
+  database = mysql_database.test.name
+  name     = "quote"
+
+  parameter {
+    mode = "OUT"
+    name = "message"
+    type = "VARCHAR(100)"
+  }
+
+  body = <<-SQL
+    BEGIN
+      SET message = CONCAT('it''s ', "a ""quoted"" ", 'back\'slash');
+    END
+  SQL
 }
 `
 
