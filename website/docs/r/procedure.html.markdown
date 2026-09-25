@@ -117,7 +117,7 @@ $ terraform import mysql_procedure.greet my_awesome_app.greet
 ```
 
 Importing a procedure that was not created by Terraform reads the parameter
-list back exactly as it was declared on the server, so the imported
+list and the body back exactly as they were declared on the server, so the imported
 configuration may need reformatting to match your style.
 
 ~> **Note:** The dot separating the two parts is the first one in the ID, so
