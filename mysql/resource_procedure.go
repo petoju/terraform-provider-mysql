@@ -30,6 +30,22 @@ var procedureSQLDataAccess = []string{
 
 var procedureSecurityTypes = []string{"DEFINER", "INVOKER"}
 
+// procedureCharacteristics lists the keyword sequences of the characteristics
+// that may precede a procedure body, except COMMENT which takes a value.
+var procedureCharacteristics = [][]string{
+	{"LANGUAGE", "SQL"},
+	{"NOT", "DETERMINISTIC"},
+	{"DETERMINISTIC"},
+	{"CONTAINS", "SQL"},
+	{"NO", "SQL"},
+	{"READS", "SQL", "DATA"},
+	{"MODIFIES", "SQL", "DATA"},
+	{"SQL", "SECURITY", "DEFINER"},
+	{"SQL", "SECURITY", "INVOKER"},
+}
+
+const whitespace = " \t\r\n"
+
 func resourceProcedure() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: CreateProcedure,
@@ -248,14 +264,14 @@ func readProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData) erro
 		return err
 	}
 
-	stmtSQL := "SELECT ROUTINE_DEFINITION, ROUTINE_COMMENT, IS_DETERMINISTIC, SQL_DATA_ACCESS, SECURITY_TYPE, DEFINER " +
+	stmtSQL := "SELECT ROUTINE_COMMENT, IS_DETERMINISTIC, SQL_DATA_ACCESS, SECURITY_TYPE, DEFINER " +
 		"FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ? AND ROUTINE_TYPE = 'PROCEDURE'"
 	log.Println("[DEBUG] Executing statement:", stmtSQL)
 
-	var body, comment, definer sql.NullString
+	var comment, definer sql.NullString
 	var isDeterministic, sqlDataAccess, securityType string
 	err = db.QueryRowContext(ctx, stmtSQL, database, name).Scan(
-		&body, &comment, &isDeterministic, &sqlDataAccess, &securityType, &definer,
+		&comment, &isDeterministic, &sqlDataAccess, &securityType, &definer,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -265,7 +281,7 @@ func readProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData) erro
 		return fmt.Errorf("failed reading procedure: %w", err)
 	}
 
-	parameters, err := readProcedureParameters(ctx, db, database, name)
+	parameters, body, err := readProcedureDefinition(ctx, db, database, name)
 	if err != nil {
 		if mysqlErrorNumber(err) == unknownProcedureErrCode {
 			d.SetId("")
@@ -276,7 +292,7 @@ func readProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData) erro
 
 	d.Set("database", database)
 	d.Set("name", name)
-	d.Set("body", body.String)
+	d.Set("body", body)
 	d.Set("comment", comment.String)
 	d.Set("deterministic", isDeterministic == "YES")
 	d.Set("sql_data_access", sqlDataAccess)
@@ -287,26 +303,37 @@ func readProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData) erro
 	return nil
 }
 
-// readProcedureParameters recovers the parameter list from SHOW CREATE
-// PROCEDURE. information_schema.PARAMETERS cannot be used because it reports
-// the type as MySQL normalized it (INT becomes int(11) on 5.7 and MariaDB but
-// int on 8.0), which would produce a permanent diff. SHOW CREATE PROCEDURE
-// returns the parameter list exactly as it was declared.
-func readProcedureParameters(ctx context.Context, db *sql.DB, database, name string) ([]interface{}, error) {
+// readProcedureDefinition recovers the parameter list and the body from SHOW
+// CREATE PROCEDURE, which returns both exactly as they were declared.
+// information_schema cannot be used for either: PARAMETERS reports the type as
+// MySQL normalized it (INT becomes int(11) on 5.7 and MariaDB but int on 8.0),
+// and ROUTINES.ROUTINE_DEFINITION unescapes quotes inside string literals on
+// MySQL, which is not valid SQL and would produce a permanent diff.
+func readProcedureDefinition(ctx context.Context, db *sql.DB, database, name string) ([]interface{}, string, error) {
 	stmtSQL := "SHOW CREATE PROCEDURE " + qualifiedProcedureName(database, name)
 	log.Println("[DEBUG] Executing statement:", stmtSQL)
 
 	createStmt, err := showCreateProcedure(ctx, db, stmtSQL)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	parameterList, err := extractProcedureParameterList(createStmt)
+	parameterList, remainder, err := extractProcedureParameterList(createStmt)
 	if err != nil {
-		return nil, fmt.Errorf("failed parsing %q: %w", createStmt, err)
+		return nil, "", fmt.Errorf("failed parsing %q: %w", createStmt, err)
 	}
 
-	return parseProcedureParameterList(parameterList)
+	parameters, err := parseProcedureParameterList(parameterList)
+	if err != nil {
+		return nil, "", err
+	}
+
+	body, err := extractProcedureBody(remainder)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed parsing %q: %w", createStmt, err)
+	}
+
+	return parameters, body, nil
 }
 
 // showCreateProcedure runs SHOW CREATE PROCEDURE and returns the "Create
@@ -419,8 +446,9 @@ func procedureParametersSQL(parameters []interface{}) (string, error) {
 }
 
 // extractProcedureParameterList returns the text between the parentheses that
-// follow the routine name in a CREATE PROCEDURE statement.
-func extractProcedureParameterList(createStmt string) (string, error) {
+// follow the routine name in a CREATE PROCEDURE statement, along with the rest
+// of the statement after the closing parenthesis.
+func extractProcedureParameterList(createStmt string) (string, string, error) {
 	start := -1
 	depth := 0
 
@@ -429,7 +457,7 @@ func extractProcedureParameterList(createStmt string) (string, error) {
 		case '`', '\'', '"':
 			end, err := skipQuoted(createStmt, i)
 			if err != nil {
-				return "", err
+				return "", "", err
 			}
 			i = end
 
@@ -442,15 +470,93 @@ func extractProcedureParameterList(createStmt string) (string, error) {
 		case ')':
 			depth--
 			if depth < 0 {
-				return "", fmt.Errorf("unbalanced parentheses")
+				return "", "", fmt.Errorf("unbalanced parentheses")
 			}
 			if depth == 0 {
-				return createStmt[start:i], nil
+				return createStmt[start:i], createStmt[i+1:], nil
 			}
 		}
 	}
 
-	return "", fmt.Errorf("no parameter list found")
+	return "", "", fmt.Errorf("no parameter list found")
+}
+
+// extractProcedureBody returns the routine body from the part of a CREATE
+// PROCEDURE statement that follows the parameter list, skipping the
+// characteristics that precede the body.
+func extractProcedureBody(remainder string) (string, error) {
+	for {
+		remainder = strings.TrimLeft(remainder, whitespace)
+
+		n, err := procedureCharacteristicLength(remainder)
+		if err != nil {
+			return "", err
+		}
+		if n == 0 {
+			break
+		}
+		remainder = remainder[n:]
+	}
+
+	body := strings.TrimSpace(remainder)
+	if body == "" {
+		return "", fmt.Errorf("no procedure body found")
+	}
+
+	return body, nil
+}
+
+// procedureCharacteristicLength returns the length of the characteristic s
+// starts with, or 0 when s does not start with one. No statement starts with
+// a characteristic keyword, so the first mismatch marks the start of the body.
+// COMMENT only counts when a string follows it: a label may be named comment.
+func procedureCharacteristicLength(s string) (int, error) {
+	if n := keywordsLength(s, "COMMENT"); n > 0 {
+		value := strings.TrimLeft(s[n:], whitespace)
+		if value != "" && (value[0] == '\'' || value[0] == '"') {
+			end, err := skipQuoted(value, 0)
+			if err != nil {
+				return 0, err
+			}
+			return len(s) - len(value) + end + 1, nil
+		}
+	}
+
+	for _, characteristic := range procedureCharacteristics {
+		if n := keywordsLength(s, characteristic...); n > 0 {
+			return n, nil
+		}
+	}
+
+	return 0, nil
+}
+
+// keywordsLength returns the length of the whitespace separated keywords s
+// starts with, matched case-insensitively as whole words, or 0 on a mismatch.
+func keywordsLength(s string, keywords ...string) int {
+	n := 0
+
+	for i, keyword := range keywords {
+		if i > 0 {
+			trimmed := strings.TrimLeft(s[n:], whitespace)
+			if len(trimmed) == len(s[n:]) {
+				return 0
+			}
+			n = len(s) - len(trimmed)
+		}
+
+		rest := s[n:]
+		if len(rest) < len(keyword) || !strings.EqualFold(rest[:len(keyword)], keyword) {
+			return 0
+		}
+		n += len(keyword)
+
+		if n < len(s) && !strings.ContainsRune(whitespace, rune(s[n])) {
+			return 0
+		}
+	}
+
+	return n
 }
 
 // parseProcedureParameterList splits a parameter list on its top level commas
