@@ -224,24 +224,48 @@ func Provider() *schema.Provider {
 			},
 
 			"iam_database_authentication": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  false,
+				Type:          schema.TypeBool,
+				Optional:      true,
+				Default:       false,
+				Deprecated:    "Please use gcp_config.iam_database_authentication instead",
+				ConflictsWith: []string{"gcp_config.0.iam_database_authentication"},
 			},
 			"private_ip": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  false,
+				Type:          schema.TypeBool,
+				Optional:      true,
+				Default:       false,
+				Deprecated:    "Please use gcp_config.private_ip instead",
+				ConflictsWith: []string{"gcp_config.0.private_ip"},
 			},
-			"gcp_impersonate_service_account": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				DefaultFunc: schema.EnvDefaultFunc("MYSQL_GCP_IMPERSONATE_SERVICE_ACCOUNT", ""),
-				Description: "Service account to impersonate when authenticating to GCP CloudSQL. Only applies to cloudsql:// endpoints.",
-				ValidateFunc: validation.StringMatch(
-					gcpServiceAccountEmailRegexp,
-					"must be a service account email address, e.g. name@project.iam.gserviceaccount.com",
-				),
+			"gcp_config": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Default:  nil,
+				MaxItems: 1,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"impersonate_service_account": {
+							Type:        schema.TypeString,
+							Optional:    true,
+							DefaultFunc: schema.EnvDefaultFunc("MYSQL_GCP_IMPERSONATE_SERVICE_ACCOUNT", ""),
+							Description: "Service account to impersonate when authenticating to GCP CloudSQL.",
+							ValidateFunc: validation.StringMatch(
+								gcpServiceAccountEmailRegexp,
+								"must be a service account email address, e.g. name@project.iam.gserviceaccount.com",
+							),
+						},
+						"iam_database_authentication": {
+							Type:        schema.TypeBool,
+							Optional:    true,
+							Description: "Log in to the database with an IAM principal instead of a MySQL password.",
+						},
+						"private_ip": {
+							Type:        schema.TypeBool,
+							Optional:    true,
+							Description: "Connect to the private IP of the instance.",
+						},
+					},
+				},
 			},
 			"aws_config": {
 				Type:     schema.TypeList,
@@ -536,10 +560,24 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var password = d.Get("password").(string)
 	var iamAuth = d.Get("iam_database_authentication").(bool)
 	var privateIp = d.Get("private_ip").(bool)
-	var impersonateServiceAccount = d.Get("gcp_impersonate_service_account").(string)
+	var impersonateServiceAccount string
 	var tlsConfig = d.Get("tls").(string)
 	var tlsConfigStruct *tls.Config
 	configKey := "default"
+
+	gcpConfigBlock := d.Get("gcp_config").([]interface{})
+	if len(gcpConfigBlock) > 0 && gcpConfigBlock[0] != nil {
+		config := gcpConfigBlock[0].(map[string]interface{})
+		impersonateServiceAccount = config["impersonate_service_account"].(string)
+		// The deprecated arguments conflict with these, so only one of each
+		// pair can be set.
+		if v := config["iam_database_authentication"].(bool); v {
+			iamAuth = v
+		}
+		if v := config["private_ip"].(bool); v {
+			privateIp = v
+		}
+	}
 
 	if impersonateServiceAccount != "" && !strings.HasPrefix(endpoint, "cloudsql://") {
 		log.Printf("[WARN] gcp_impersonate_service_account only applies to cloudsql:// endpoints, ignoring it")
