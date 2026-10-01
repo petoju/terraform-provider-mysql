@@ -90,6 +90,8 @@ No further attributes are exported.
 Grants can be imported using user, host, database and table.
 For grants without explicit database or tables, use `*`.
 For role grants, append `;r` as a suffix to the import id.
+For grants to a role (set with `role`), leave the host empty and append `;role`.
+To import a role grant to a role, use both suffixes: `;r;role`.
 
 You can also add an extra at sign `@` to the import definition to specify
 the grant contains WITH GRANT OPTION.
@@ -100,6 +102,9 @@ $ terraform import mysql_grant.all_db user@host@*@*
 
 # Import a role grant
 $ terraform import mysql_grant.role user@host@database@table;r
+
+# Import a grant to a role
+$ terraform import mysql_grant.to_role role@@database@table;role
 
 # Import the first example with grant option
 $ terraform import mysql_grant.example user@host@database@table@

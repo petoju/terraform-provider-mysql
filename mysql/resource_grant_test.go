@@ -467,6 +467,12 @@ func TestAccGrant_role(t *testing.T) {
 					resource.TestCheckResourceAttr("mysql_grant.test", "role", roleName),
 				),
 			},
+			{
+				ResourceName:      "mysql_grant.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     fmt.Sprintf("%v@@%v@%v;role", roleName, dbName, "*"),
+			},
 		},
 	})
 }
@@ -583,8 +589,87 @@ func TestAccGrant_roleToRoleGrant(t *testing.T) {
 			{
 				Config: testAccGrantConfigRoleToRole(dbName, roleName1, roleName2),
 			},
+			{
+				ResourceName:      "mysql_grant.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     fmt.Sprintf("%v@@%v@%v;r;role", roleName1, dbName, "*"),
+			},
 		},
 	})
+}
+
+func TestParseGrantImportID(t *testing.T) {
+	tests := []struct {
+		name     string
+		id       string
+		expected grantImportID
+		wantErr  bool
+	}{
+		{
+			name:     "privilege grant to a user",
+			id:       "jdoe@example.com@db@*",
+			expected: grantImportID{UserOrRole: UserOrRole{Name: "jdoe", Host: "example.com"}, Database: "db", Table: "*"},
+		},
+		{
+			name:     "grant option",
+			id:       "jdoe@example.com@db@*@",
+			expected: grantImportID{UserOrRole: UserOrRole{Name: "jdoe", Host: "example.com"}, Database: "db", Table: "*", GrantOption: true},
+		},
+		{
+			name:     "role grant to a user",
+			id:       "jdoe@example.com@db@*;r",
+			expected: grantImportID{UserOrRole: UserOrRole{Name: "jdoe", Host: "example.com"}, Database: "db", Table: "*", RoleGrant: true},
+		},
+		{
+			name:     "privilege grant to a role",
+			id:       "reader@@db@*;role",
+			expected: grantImportID{UserOrRole: UserOrRole{Name: "reader"}, Database: "db", Table: "*", ToRole: true},
+		},
+		{
+			name:     "role grant to a role, in either suffix order",
+			id:       "reader@@db@*;role;r",
+			expected: grantImportID{UserOrRole: UserOrRole{Name: "reader"}, Database: "db", Table: "*", RoleGrant: true, ToRole: true},
+		},
+		{
+			name:     "grant option on a role grant to a role",
+			id:       "reader@@db@*@;r;role",
+			expected: grantImportID{UserOrRole: UserOrRole{Name: "reader"}, Database: "db", Table: "*", GrantOption: true, RoleGrant: true, ToRole: true},
+		},
+		{
+			name:     "empty host without ;role stays a user grant",
+			id:       "jdoe@@db@*",
+			expected: grantImportID{UserOrRole: UserOrRole{Name: "jdoe"}, Database: "db", Table: "*"},
+		},
+		{
+			name:    "role with a host",
+			id:      "reader@%@db@*;role",
+			wantErr: true,
+		},
+		{
+			name:    "too few parts",
+			id:      "jdoe@example.com@db",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseGrantImportID(tt.id)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseGrantImportID(%q) = %+v, want an error", tt.id, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseGrantImportID(%q) returned an error: %v", tt.id, err)
+			}
+			if got != tt.expected {
+				t.Errorf("parseGrantImportID(%q) = %+v, want %+v", tt.id, got, tt.expected)
+			}
+		})
+	}
 }
 
 func testSqlQueryAsUser(sql, userName, password string) resource.TestCheckFunc {
