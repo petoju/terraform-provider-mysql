@@ -94,7 +94,11 @@ For grants to a role (set with `role`), leave the host empty and append `;role`.
 To import a role grant to a role, use both suffixes: `;r;role`.
 
 You can also add an extra at sign `@` to the import definition to specify
-the grant contains WITH GRANT OPTION.
+the grant contains WITH GRANT OPTION. Put it before any suffix:
+`role@@database@table@;role`.
+
+Import ids do not support quoting or escaping. A name that contains `@`, or a
+table name that ends in `;r` or `;role`, cannot be imported.
 
 ```
 $ terraform import mysql_grant.example user@host@database@table
@@ -108,4 +112,7 @@ $ terraform import mysql_grant.to_role role@@database@table;role
 
 # Import the first example with grant option
 $ terraform import mysql_grant.example user@host@database@table@
+
+# Import a grant to a role with grant option
+$ terraform import mysql_grant.to_role role@@database@table@;role
 ```

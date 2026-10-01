@@ -462,6 +462,12 @@ func TestAccGrant_role(t *testing.T) {
 				),
 			},
 			{
+				ResourceName:      "mysql_grant.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     fmt.Sprintf("%v@@%v@%v@;role", roleName, dbName, "*"),
+			},
+			{
 				Config: testAccGrantConfigRole(dbName, roleName),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("mysql_grant.test", "role", roleName),
