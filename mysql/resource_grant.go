@@ -667,34 +667,68 @@ func isNonExistingGrant(err error) bool {
 	return errorNumber == 1141 || errorNumber == 1147 || errorNumber == 1403
 }
 
-func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	userHostDatabaseTable := strings.Split(strings.TrimSuffix(d.Id(), ";r"), "@")
+// grantImportID is a parsed mysql_grant import ID: user@host@database@table,
+// optionally followed by @ (grant option), ;r (role grant), and ;role (the
+// grantee is a role).
+type grantImportID struct {
+	UserOrRole  UserOrRole
+	Database    string
+	Table       string
+	GrantOption bool
+	RoleGrant   bool
+	ToRole      bool
+}
 
+func parseGrantImportID(id string) (grantImportID, error) {
+	var parsed grantImportID
+	rest := id
+	for {
+		if trimmed, ok := strings.CutSuffix(rest, ";role"); ok {
+			rest, parsed.ToRole = trimmed, true
+		} else if trimmed, ok := strings.CutSuffix(rest, ";r"); ok {
+			rest, parsed.RoleGrant = trimmed, true
+		} else {
+			break
+		}
+	}
+
+	userHostDatabaseTable := strings.Split(rest, "@")
 	if len(userHostDatabaseTable) != 4 && len(userHostDatabaseTable) != 5 {
-		return nil, fmt.Errorf("wrong ID format %s - expected user@host@database@table (and optionally ending @ to signify grant option) where some parts can be empty)", d.Id())
+		return parsed, fmt.Errorf("wrong ID format %s - expected user@host@database@table (and optionally ending @ to signify grant option) where some parts can be empty)", id)
 	}
 
-	user := userHostDatabaseTable[0]
-	host := userHostDatabaseTable[1]
-	database := userHostDatabaseTable[2]
-	table := userHostDatabaseTable[3]
-	grantOption := len(userHostDatabaseTable) == 5
-	userOrRole := UserOrRole{
-		Name: user,
-		Host: host,
+	parsed.UserOrRole = UserOrRole{
+		Name: userHostDatabaseTable[0],
+		Host: userHostDatabaseTable[1],
 	}
+	parsed.Database = userHostDatabaseTable[2]
+	parsed.Table = userHostDatabaseTable[3]
+	parsed.GrantOption = len(userHostDatabaseTable) == 5
+
+	if parsed.ToRole && parsed.UserOrRole.Host != "" {
+		return parsed, fmt.Errorf("wrong ID format %s - a role has no host, so leave the host empty when using ;role", id)
+	}
+	return parsed, nil
+}
+
+func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+	importID, err := parseGrantImportID(d.Id())
+	if err != nil {
+		return nil, err
+	}
+	userOrRole := importID.UserOrRole
 
 	var desiredGrant MySQLGrant
-	if strings.HasSuffix(d.Id(), ";r") {
+	if importID.RoleGrant {
 		desiredGrant = &RoleGrant{
 			UserOrRole: userOrRole,
-			Grant:      grantOption,
+			Grant:      importID.GrantOption,
 		}
 	} else {
 		desiredGrant = &TablePrivilegeGrant{
-			Database:   database,
-			Table:      table,
-			Grant:      grantOption,
+			Database:   importID.Database,
+			Table:      importID.Table,
+			Grant:      importID.GrantOption,
 			UserOrRole: userOrRole,
 		}
 	}
@@ -711,21 +745,27 @@ func ImportGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	for _, foundGrant := range grants {
 		if foundGrant.ConflictsWithGrant(desiredGrant) {
 			res := resourceGrant().Data(nil)
+			if importID.ToRole {
+				// setDataFromGrant keeps role over user/host only when role is already set.
+				// Host stays at its schema default, which is what create stores.
+				res.Set("role", userOrRole.Name)
+				res.Set("host", resourceGrant().Schema["host"].Default)
+			}
 			setDataFromGrant(foundGrant, res)
-			if _, ok := desiredGrant.(*RoleGrant); ok {
+			if importID.RoleGrant {
 				/*
 					Import database and table for role grants literally for backwards compatibility.
 					Role grants do not have a database or table, but we still set them here to avoid
 					making existing resources to "force replacement".
 				*/
-				res.Set("database", database)
-				res.Set("table", table)
+				res.Set("database", importID.Database)
+				res.Set("table", importID.Table)
 			}
 			return []*schema.ResourceData{res}, nil
 		}
 	}
 
-	return nil, fmt.Errorf("failed to find the grant to import: %v -- found %#v", userHostDatabaseTable, grants)
+	return nil, fmt.Errorf("failed to find the grant to import: %v -- found %#v", d.Id(), grants)
 }
 
 // setDataFromGrant copies the values from MySQLGrant to the schema.ResourceData
