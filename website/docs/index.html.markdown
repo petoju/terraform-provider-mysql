@@ -189,6 +189,33 @@ provider "mysql" {
 - Assume role is fully supported - the provider will use the assumed role credentials when accessing both RDS Data API and Secrets Manager
 - Some MySQL features may have limitations when using the Data API
 
+#### Using HCP Terraform dynamic credentials:
+
+HCP Terraform dynamic provider credentials are delivered as an AWS shared config file whose path is only available through the `tfc_aws_dynamic_credentials` variable. Pass it with `shared_config_files`, the same way as the AWS provider:
+
+```hcl
+variable "tfc_aws_dynamic_credentials" {
+  type = object({
+    default = object({
+      shared_config_file = string
+    })
+    aliases = map(object({
+      shared_config_file = string
+    }))
+  })
+}
+
+provider "mysql" {
+  aws_config {
+    use_rds_data_api    = true
+    region              = "us-east-1"
+    shared_config_files = [var.tfc_aws_dynamic_credentials.default.shared_config_file]
+    cluster_arn         = "arn:aws:rds:us-east-1:123456789012:cluster:my-aurora-cluster"
+    secret_arn          = "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-db-secret"
+  }
+}
+```
+
 ### GCP CloudSQL Connection
 
 To connect to a Cloud SQL instance, prefix the endpoint with `cloudsql://` followed by the instance
@@ -390,6 +417,7 @@ The following arguments are supported:
 - `aws_config` - (Optional) Sets the AWS configuration for the connection. This is a block containing the following arguments:
   - `region` - (Optional) AWS Region for the AWS RDS instance. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
   - `profile` - (Optional) AWS SDK configuration profile. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
+  - `shared_config_files` - (Optional) List of paths to AWS shared config files. When set, these files are used instead of the default locations. Useful for HCP Terraform dynamic credentials.
   - `access_key` - (Optional) AWS Access Key ID. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
   - `secret_key` - (Optional) AWS Secret Access Key. If not provided, it will be sourced by the AWS SDK for Go from standard locations.
   - `role_arn` - (Optional) ARN of the IAM role to assume for RDS authentication.

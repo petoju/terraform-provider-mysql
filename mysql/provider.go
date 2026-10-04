@@ -281,6 +281,12 @@ func Provider() *schema.Provider {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
+						"shared_config_files": {
+							Type:        schema.TypeList,
+							Optional:    true,
+							Elem:        &schema.Schema{Type: schema.TypeString},
+							Description: "List of paths to AWS shared config files. Overrides the default locations, e.g. to use HCP Terraform dynamic credentials.",
+						},
 						"access_key": {
 							Type:     schema.TypeString,
 							Optional: true,
@@ -416,6 +422,16 @@ func buildAwsConfig(ctx context.Context, awsConfigBlock []interface{}) (aws.Conf
 	}
 	if config["profile"].(string) != "" {
 		optFns = append(optFns, awsConfig.WithSharedConfigProfile(config["profile"].(string)))
+	}
+	files, _ := config["shared_config_files"].([]interface{})
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		if path, ok := f.(string); ok && path != "" {
+			paths = append(paths, path)
+		}
+	}
+	if len(paths) > 0 {
+		optFns = append(optFns, awsConfig.WithSharedConfigFiles(paths))
 	}
 	if config["access_key"].(string) != "" || config["secret_key"].(string) != "" {
 		if config["access_key"].(string) == "" || config["secret_key"].(string) == "" {

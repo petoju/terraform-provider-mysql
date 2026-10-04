@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -171,6 +172,48 @@ func TestBuildAwsConfig(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildAwsConfigSharedConfigFiles(t *testing.T) {
+	// The default locations must not be the source of the credentials.
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "missing-config"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "missing-credentials"))
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_PROFILE", "")
+
+	path := filepath.Join(t.TempDir(), "config")
+	content := "[default]\nregion = ap-northeast-1\naws_access_key_id = AKIDFROMFILE\naws_secret_access_key = secret-from-file\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	config, err := buildAwsConfig(ctx, []interface{}{
+		map[string]interface{}{
+			"region":              "",
+			"profile":             "",
+			"shared_config_files": []interface{}{path},
+			"access_key":          "",
+			"secret_key":          "",
+			"role_arn":            "",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if config.Region != "ap-northeast-1" {
+		t.Errorf("Expected region from shared config file, got %q", config.Region)
+	}
+
+	creds, err := config.Credentials.Retrieve(ctx)
+	if err != nil {
+		t.Fatalf("Failed to retrieve credentials: %v", err)
+	}
+	if creds.AccessKeyID != "AKIDFROMFILE" {
+		t.Errorf("Expected credentials from shared config file, got access key %q", creds.AccessKeyID)
 	}
 }
 
