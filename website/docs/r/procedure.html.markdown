@@ -62,12 +62,12 @@ The following arguments are supported:
   block. Leading and trailing whitespace and a trailing `;` are stripped,
   matching what the server stores. The server does not store a comment after
   the final `;` either, so such a comment causes a permanent diff. Changing
-  this forces the procedure to be recreated, because MySQL cannot alter the
-  body of an existing routine.
+  this recreates the procedure in place, because MySQL cannot alter the body
+  of an existing routine. See the note on recreation below.
 
 * `parameter` - (Optional) A parameter of the procedure, in declaration order.
-  May be given more than once. Changing the parameters forces the procedure to
-  be recreated. The block supports:
+  May be given more than once. Changing the parameters recreates the
+  procedure in place. The block supports:
   * `name` - (Required) The parameter name.
   * `type` - (Required) The parameter type, written exactly as it would be in
     the ``CREATE PROCEDURE`` statement, for example ``INT``,
@@ -79,14 +79,14 @@ The following arguments are supported:
   ``user@host`` form. Defaults to the account Terraform connects with.
   Specifying another account requires the ``SET_USER_ID`` privilege (``SUPER``
   before MySQL 8.0.16), which is not granted on managed offerings such as RDS.
-  Changing this forces the procedure to be recreated.
+  Changing this recreates the procedure in place.
 
 * `comment` - (Optional) A comment describing the procedure. Defaults to an
   empty string.
 
 * `deterministic` - (Optional) Whether the procedure always produces the same
-  result for the same input. Defaults to ``false``. Changing this forces the
-  procedure to be recreated, because ``ALTER PROCEDURE`` cannot change it.
+  result for the same input. Defaults to ``false``. Changing this recreates
+  the procedure in place, because ``ALTER PROCEDURE`` cannot change it.
 
 * `sql_data_access` - (Optional) What kind of SQL the procedure contains, one
   of ``CONTAINS SQL``, ``NO SQL``, ``READS SQL DATA`` or
@@ -100,6 +100,22 @@ The following arguments are supported:
 ~> **Note:** `body` and the parameter `type` are interpolated into the
 ``CREATE PROCEDURE`` statement as written, so they must come from a trusted
 source.
+
+~> **Note:** A change to `body`, `parameter`, `definer` or `deterministic`
+drops the procedure and creates it again in the same apply. With the default
+``automatic_sp_privileges = ON``, ``DROP PROCEDURE`` revokes the privileges of
+every account on the procedure. The provider therefore reads them from
+``mysql.procs_priv`` before the ``DROP`` and grants them again after the
+``CREATE``, so `mysql_grant` resources on the procedure keep working. This
+needs ``SELECT`` on ``mysql.procs_priv``; without it, the update stops before
+the ``DROP``. If the ``CREATE`` fails, the provider restores the previous
+definition and its privileges. If the restore fails too, for example because
+the account cannot set the configured `definer`, the procedure stays dropped
+and the error says so. Calls between the ``DROP`` and the ``CREATE`` fail. If
+`definer` is not configured, the ``CREATE`` has no ``DEFINER`` clause, so the
+account Terraform connects with becomes the definer, as on the first create.
+On MariaDB, the provider uses ``CREATE OR REPLACE PROCEDURE``, which keeps the
+privileges and the old procedure if it fails.
 
 ## Attributes Reference
 
