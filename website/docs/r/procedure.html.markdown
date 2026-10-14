@@ -59,9 +59,11 @@ The following arguments are supported:
   procedure to be recreated.
 
 * `body` - (Required) The routine body, most commonly a ``BEGIN ... END``
-  block. Leading and trailing whitespace is stripped, matching what the server
-  stores. Changing this forces the procedure to be recreated, because MySQL
-  cannot alter the body of an existing routine.
+  block. Leading and trailing whitespace and a trailing `;` are stripped,
+  matching what the server stores. The server does not store a comment after
+  the final `;` either, so such a comment causes a permanent diff. Changing
+  this forces the procedure to be recreated, because MySQL cannot alter the
+  body of an existing routine.
 
 * `parameter` - (Optional) A parameter of the procedure, in declaration order.
   May be given more than once. Changing the parameters forces the procedure to

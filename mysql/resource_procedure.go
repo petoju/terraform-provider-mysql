@@ -110,7 +110,7 @@ func resourceProcedure() *schema.Resource {
 				Type:      schema.TypeString,
 				Required:  true,
 				ForceNew:  true,
-				StateFunc: trimSpace,
+				StateFunc: trimBody,
 			},
 
 			"comment": {
@@ -415,7 +415,7 @@ func procedureCreateSQL(d *schema.ResourceData) (string, error) {
 
 	builder.WriteString("\n" + strings.ToUpper(d.Get("sql_data_access").(string)))
 	builder.WriteString("\nSQL SECURITY " + strings.ToUpper(d.Get("security_type").(string)))
-	builder.WriteString("\n" + strings.TrimSpace(d.Get("body").(string)))
+	builder.WriteString("\n" + trimBody(d.Get("body")))
 
 	return builder.String(), nil
 }
@@ -780,6 +780,9 @@ func upperCase(v interface{}) string {
 	return strings.ToUpper(v.(string))
 }
 
-func trimSpace(v interface{}) string {
-	return strings.TrimSpace(v.(string))
+// trimBody strips the surrounding whitespace and any trailing statement
+// terminator. The server stores neither, so keeping them would make the body
+// differ from what is read back and force a replacement on every plan.
+func trimBody(v interface{}) string {
+	return strings.TrimRight(strings.TrimSpace(v.(string)), whitespace+";")
 }
