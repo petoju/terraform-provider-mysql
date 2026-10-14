@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -62,7 +63,7 @@ func TestAccProcedure_basic(t *testing.T) {
 				),
 			},
 			{
-				// A new body forces the procedure to be recreated.
+				// A new body recreates the procedure in place.
 				Config: testAccProcedureConfigUpdatedBody,
 				Check: resource.ComposeTestCheckFunc(
 					testAccProcedureExists("mysql_procedure.test"),
@@ -186,6 +187,66 @@ func TestAccProcedure_escapedQuotes(t *testing.T) {
 	})
 }
 
+func TestAccProcedure_recreateKeepsGrants(t *testing.T) {
+	grants := map[string]string{
+		"tf_proc_exec":  "Execute",
+		"tf_proc_admin": "Execute,Alter Routine,Grant",
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccProcedureCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProcedureConfigGrants("", "INT", false, "SELECT 1"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccProcedureExists("mysql_procedure.test"),
+					testAccProcedureGrants("tf_test_procedure", "granted", grants),
+				),
+			},
+			{
+				// DROP PROCEDURE revokes every privilege on the routine, so the
+				// grants must be restored or the plan after this apply would
+				// create them again.
+				Config: testAccProcedureConfigGrants("", "BIGINT", true, "SELECT 2"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccProcedureCharacteristics("tf_test_procedure", "granted", map[string]string{
+						"ROUTINE_DEFINITION": "SELECT 2",
+						"IS_DETERMINISTIC":   "YES",
+					}),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "parameter.0.type", "BIGINT"),
+					testAccProcedureGrants("tf_test_procedure", "granted", grants),
+				),
+			},
+			{
+				Config: testAccProcedureConfigGrants("tf_proc_definer@localhost", "BIGINT", true, "SELECT 2"),
+				Check: resource.ComposeTestCheckFunc(
+					testAccProcedureCharacteristics("tf_test_procedure", "granted", map[string]string{
+						"DEFINER": "tf_proc_definer@localhost",
+					}),
+					testAccProcedureGrants("tf_test_procedure", "granted", grants),
+				),
+			},
+			{
+				// The new body is invalid, so the previous definition and its
+				// grants must be restored.
+				Config:      testAccProcedureConfigGrants("tf_proc_definer@localhost", "BIGINT", true, "SELEC 3"),
+				ExpectError: regexp.MustCompile("failed recreating procedure"),
+			},
+			{
+				// A plan only, because an apply would create a missing procedure
+				// and its grants again and hide a failed restore.
+				Config:   testAccProcedureConfigGrants("tf_proc_definer@localhost", "BIGINT", true, "SELECT 2"),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
 func TestAccProcedure_trailingSemicolon(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
@@ -268,6 +329,45 @@ func testAccProcedureCharacteristics(database, name string, expected map[string]
 			if got != want {
 				return fmt.Errorf("expected %s of procedure %s.%s to be %q, got %q", column, database, name, want, got)
 			}
+		}
+
+		return nil
+	}
+}
+
+// testAccProcedureGrants compares the privileges in mysql.procs_priv on a
+// procedure with the expected Proc_priv value of each user.
+func testAccProcedureGrants(database, name string, expected map[string]string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		ctx := context.Background()
+		db, err := connectToMySQL(ctx, testAccProvider.Meta().(*MySQLConfiguration))
+		if err != nil {
+			return err
+		}
+
+		rows, err := db.QueryContext(ctx,
+			"SELECT User, Proc_priv FROM mysql.procs_priv WHERE Db = ? AND Routine_name = ? AND Routine_type = 'PROCEDURE'",
+			database, name,
+		)
+		if err != nil {
+			return fmt.Errorf("error reading the grants on procedure %s.%s: %w", database, name, err)
+		}
+		defer rows.Close()
+
+		got := map[string]string{}
+		for rows.Next() {
+			var user, privileges string
+			if err := rows.Scan(&user, &privileges); err != nil {
+				return err
+			}
+			got[user] = privileges
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		if !reflect.DeepEqual(got, expected) {
+			return fmt.Errorf("expected grants on procedure %s.%s to be %v, got %v", database, name, expected, got)
 		}
 
 		return nil
@@ -624,6 +724,68 @@ func TestValidateDefiner(t *testing.T) {
 	}
 }
 
+// TestProcedureGrantSQL covers turning a mysql.procs_priv row back into a GRANT
+// statement; needs no database.
+func TestProcedureGrantSQL(t *testing.T) {
+	testCases := []struct {
+		name        string
+		routine     string
+		procPriv    string
+		expected    string
+		expectError bool
+	}{
+		{
+			name:     "execute",
+			routine:  "p",
+			procPriv: "Execute",
+			expected: "GRANT EXECUTE ON PROCEDURE `d`.`p` TO `u`@`%`",
+		},
+		{
+			name:     "all with grant option",
+			routine:  "p",
+			procPriv: "Execute,Alter Routine,Grant",
+			expected: "GRANT EXECUTE, ALTER ROUTINE ON PROCEDURE `d`.`p` TO `u`@`%` WITH GRANT OPTION",
+		},
+		{
+			name:     "grant option only",
+			routine:  "p",
+			procPriv: "Grant",
+			expected: "GRANT USAGE ON PROCEDURE `d`.`p` TO `u`@`%` WITH GRANT OPTION",
+		},
+		{
+			name:     "routine name case is kept",
+			routine:  "P",
+			procPriv: "Alter Routine",
+			expected: "GRANT ALTER ROUTINE ON PROCEDURE `d`.`P` TO `u`@`%`",
+		},
+		{
+			name:        "unknown privilege",
+			routine:     "p",
+			procPriv:    "Execute,Drop",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			grant, err := newProcedureGrant("d", tc.routine, "u", "%", tc.procPriv)
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected an error, got %q", grant.grantSQL())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got := grant.grantSQL(); got != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, got)
+			}
+		})
+	}
+}
+
 // TestTrimBody covers normalizing the body before it is stored; needs no
 // database.
 func TestTrimBody(t *testing.T) {
@@ -815,6 +977,66 @@ resource "mysql_procedure" "test" {
   SQL
 }
 `
+
+// testAccProcedureConfigGrants returns a procedure with two grants on it. An
+// empty definer leaves the definer to the server.
+func testAccProcedureConfigGrants(definer, parameterType string, deterministic bool, body string) string {
+	definerAttribute := ""
+	if definer != "" {
+		definerAttribute = fmt.Sprintf("definer = %q", definer)
+	}
+
+	return fmt.Sprintf(`
+resource "mysql_database" "test" {
+  name = "tf_test_procedure"
+}
+
+resource "mysql_user" "definer" {
+  user = "tf_proc_definer"
+  host = "localhost"
+}
+
+resource "mysql_user" "exec" {
+  user = "tf_proc_exec"
+  host = "%%"
+}
+
+resource "mysql_user" "admin" {
+  user = "tf_proc_admin"
+  host = "%%"
+}
+
+resource "mysql_procedure" "test" {
+  database      = mysql_database.test.name
+  name          = "granted"
+  deterministic = %t
+  body          = %q
+  %s
+
+  parameter {
+    name = "amount"
+    type = %q
+  }
+
+  depends_on = [mysql_user.definer]
+}
+
+resource "mysql_grant" "exec" {
+  user       = mysql_user.exec.user
+  host       = mysql_user.exec.host
+  database   = "PROCEDURE ${mysql_procedure.test.database}.${mysql_procedure.test.name}"
+  privileges = ["EXECUTE"]
+}
+
+resource "mysql_grant" "admin" {
+  user       = mysql_user.admin.user
+  host       = mysql_user.admin.host
+  database   = "PROCEDURE ${mysql_procedure.test.database}.${mysql_procedure.test.name}"
+  privileges = ["EXECUTE", "ALTER ROUTINE"]
+  grant      = true
+}
+`, deterministic, body, definerAttribute, parameterType)
+}
 
 const testAccProcedureConfigNoParameters = `
 resource "mysql_database" "test" {
