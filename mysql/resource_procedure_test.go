@@ -186,6 +186,39 @@ func TestAccProcedure_escapedQuotes(t *testing.T) {
 	})
 }
 
+func TestAccProcedure_trailingSemicolon(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy:      testAccProcedureCheckDestroy,
+		Steps: []resource.TestStep{
+			{
+				// The server does not store the final statement terminator, so
+				// it must not be kept in state either or every plan would
+				// replace the procedure.
+				Config: testAccProcedureConfigTrailingSemicolon,
+				Check: resource.ComposeTestCheckFunc(
+					testAccProcedureExists("mysql_procedure.test"),
+					resource.TestCheckResourceAttr("mysql_procedure.test", "body", "BEGIN\n  SELECT 1;\nEND"),
+					testAccProcedureCharacteristics("tf_test_procedure", "terminated", map[string]string{
+						"ROUTINE_DEFINITION": "BEGIN\n  SELECT 1;\nEND",
+					}),
+				),
+			},
+			{
+				Config:            testAccProcedureConfigTrailingSemicolon,
+				ResourceName:      "mysql_procedure.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     "tf_test_procedure.terminated",
+			},
+		},
+	})
+}
+
 func testAccProcedureExists(rn string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]
@@ -591,6 +624,33 @@ func TestValidateDefiner(t *testing.T) {
 	}
 }
 
+// TestTrimBody covers normalizing the body before it is stored; needs no
+// database.
+func TestTrimBody(t *testing.T) {
+	testCases := []struct {
+		name     string
+		body     string
+		expected string
+	}{
+		{name: "plain", body: "SELECT 1", expected: "SELECT 1"},
+		{name: "surrounding whitespace", body: "\n  SELECT 1\n", expected: "SELECT 1"},
+		{name: "terminator", body: "SELECT 1;", expected: "SELECT 1"},
+		{name: "spaced terminator", body: "SELECT 1 ;\n", expected: "SELECT 1"},
+		{name: "repeated terminators", body: "SELECT 1; ;", expected: "SELECT 1"},
+		{name: "block with terminator", body: "BEGIN\n  SELECT 1;\nEND;\n", expected: "BEGIN\n  SELECT 1;\nEND"},
+		{name: "windows line endings", body: "BEGIN\r\n  SELECT 1;\r\nEND;\r\n", expected: "BEGIN\r\n  SELECT 1;\r\nEND"},
+		{name: "terminator inside literal", body: "SELECT ';'", expected: "SELECT ';'"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := trimBody(tc.body); got != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, got)
+			}
+		})
+	}
+}
+
 const testAccProcedureConfigBasic = `
 resource "mysql_database" "test" {
   name = "tf_test_procedure"
@@ -735,6 +795,23 @@ resource "mysql_procedure" "test" {
     BEGIN
       SET message = CONCAT('it''s ', "a ""quoted"" ", 'back\'slash');
     END
+  SQL
+}
+`
+
+const testAccProcedureConfigTrailingSemicolon = `
+resource "mysql_database" "test" {
+  name = "tf_test_procedure"
+}
+
+resource "mysql_procedure" "test" {
+  database = mysql_database.test.name
+  name     = "terminated"
+
+  body = <<-SQL
+    BEGIN
+      SELECT 1;
+    END;
   SQL
 }
 `
