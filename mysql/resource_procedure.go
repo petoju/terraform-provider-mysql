@@ -73,7 +73,6 @@ func resourceProcedure() *schema.Resource {
 				Type:         schema.TypeString,
 				Optional:     true,
 				Computed:     true,
-				ForceNew:     true,
 				StateFunc:    normalizeDefiner,
 				ValidateFunc: validateDefiner,
 			},
@@ -81,13 +80,11 @@ func resourceProcedure() *schema.Resource {
 			"parameter": {
 				Type:     schema.TypeList,
 				Optional: true,
-				ForceNew: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"mode": {
 							Type:         schema.TypeString,
 							Optional:     true,
-							ForceNew:     true,
 							Default:      "IN",
 							StateFunc:    upperCase,
 							ValidateFunc: validation.StringInSlice(procedureParameterModes, true),
@@ -95,12 +92,10 @@ func resourceProcedure() *schema.Resource {
 						"name": {
 							Type:     schema.TypeString,
 							Required: true,
-							ForceNew: true,
 						},
 						"type": {
 							Type:     schema.TypeString,
 							Required: true,
-							ForceNew: true,
 						},
 					},
 				},
@@ -109,7 +104,6 @@ func resourceProcedure() *schema.Resource {
 			"body": {
 				Type:      schema.TypeString,
 				Required:  true,
-				ForceNew:  true,
 				StateFunc: trimBody,
 			},
 
@@ -122,7 +116,6 @@ func resourceProcedure() *schema.Resource {
 			"deterministic": {
 				Type:     schema.TypeBool,
 				Optional: true,
-				ForceNew: true,
 				Default:  false,
 			},
 
@@ -151,7 +144,7 @@ func CreateProcedure(ctx context.Context, d *schema.ResourceData, meta interface
 		return diag.FromErr(err)
 	}
 
-	stmtSQL, err := procedureCreateSQL(d)
+	stmtSQL, err := procedureCreateSQL(d.Get, false)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -188,8 +181,20 @@ func UpdateProcedure(ctx context.Context, d *schema.ResourceData, meta interface
 		return diag.FromErr(err)
 	}
 
-	// Only the characteristics below can be altered in place; everything else
-	// is ForceNew because MySQL requires dropping and recreating the routine.
+	database, name, err := parseProcedureID(d.Id())
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	// ALTER PROCEDURE cannot change these attributes, so the routine is
+	// recreated. The CREATE statement also sets the new characteristics.
+	if d.HasChanges("body", "parameter", "definer", "deterministic") {
+		if err := recreateProcedure(ctx, db, d, database, name); err != nil {
+			return diag.FromErr(err)
+		}
+		return ReadProcedure(ctx, d, meta)
+	}
+
 	var characteristics []string
 	if d.HasChange("comment") {
 		characteristics = append(characteristics, "COMMENT "+quoteString(d.Get("comment").(string)))
@@ -202,11 +207,6 @@ func UpdateProcedure(ctx context.Context, d *schema.ResourceData, meta interface
 	}
 
 	if len(characteristics) > 0 {
-		database, name, err := parseProcedureID(d.Id())
-		if err != nil {
-			return diag.FromErr(err)
-		}
-
 		stmtSQL := fmt.Sprintf("ALTER PROCEDURE %s %s", qualifiedProcedureName(database, name), strings.Join(characteristics, " "))
 		log.Println("[DEBUG] Executing statement:", stmtSQL)
 
@@ -216,6 +216,160 @@ func UpdateProcedure(ctx context.Context, d *schema.ResourceData, meta interface
 	}
 
 	return ReadProcedure(ctx, d, meta)
+}
+
+// recreateProcedure replaces the procedure with its new definition and keeps
+// the privileges that accounts hold on it.
+//
+// MariaDB does this in one statement: CREATE OR REPLACE PROCEDURE keeps the
+// privileges, and a failed statement leaves the old procedure in place.
+//
+// MySQL has no CREATE OR REPLACE PROCEDURE. With automatic_sp_privileges ON,
+// the default, DROP PROCEDURE revokes the privileges of every account on the
+// routine. So the privileges are read from mysql.procs_priv first and granted
+// again after the CREATE. If the CREATE fails, the old definition and its
+// privileges are restored.
+func recreateProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData, database, name string) error {
+	getNew := d.Get
+	getOld := oldValueGetter(d)
+
+	// Without a configured definer, CREATE makes the connecting account the
+	// definer, as on the first create. Naming the definer from state instead
+	// needs SET_USER_ID when it is another account, for example after an
+	// import, and the restore below would then fail too.
+	if config := d.GetRawConfig(); config.IsNull() || config.GetAttr("definer").IsNull() {
+		getNew = withoutDefiner(getNew)
+		getOld = withoutDefiner(getOld)
+	}
+
+	isMariaDB, err := serverMariaDB(db)
+	if err != nil {
+		return fmt.Errorf("failed detecting the server type: %w", err)
+	}
+
+	if isMariaDB {
+		stmtSQL, err := procedureCreateSQL(getNew, true)
+		if err != nil {
+			return fmt.Errorf("failed building the new definition of procedure %s.%s: %w", database, name, err)
+		}
+
+		log.Println("[DEBUG] Executing statement:", stmtSQL)
+		if _, err := db.ExecContext(ctx, stmtSQL); err != nil {
+			// The old procedure is unchanged, so the state must keep it too.
+			d.Partial(true)
+			return fmt.Errorf("failed recreating procedure: %w", err)
+		}
+		return nil
+	}
+
+	createSQL, err := procedureCreateSQL(getNew, false)
+	if err != nil {
+		return fmt.Errorf("failed building the new definition of procedure %s.%s: %w", database, name, err)
+	}
+
+	restoreSQL, err := procedureCreateSQL(getOld, false)
+	if err != nil {
+		return fmt.Errorf("failed building the previous definition of procedure %s.%s: %w", database, name, err)
+	}
+
+	grants, err := readProcedureGrants(ctx, db, database, name)
+	if err != nil {
+		return fmt.Errorf("failed reading the grants on procedure %s.%s, which a recreation drops; "+
+			"the provider user needs SELECT on mysql.procs_priv: %w", database, name, err)
+	}
+
+	dropSQL := "DROP PROCEDURE " + qualifiedProcedureName(database, name)
+	log.Println("[DEBUG] Executing statement:", dropSQL)
+	if _, err := db.ExecContext(ctx, dropSQL); err != nil {
+		return fmt.Errorf("failed dropping procedure: %w", err)
+	}
+
+	log.Println("[DEBUG] Executing statement:", createSQL)
+	if _, err := db.ExecContext(ctx, createSQL); err != nil {
+		createErr := fmt.Errorf("failed recreating procedure: %w", err)
+		d.Partial(true)
+
+		log.Println("[DEBUG] Executing statement:", restoreSQL)
+		if _, err := db.ExecContext(ctx, restoreSQL); err != nil {
+			return fmt.Errorf("%w; restoring the previous definition also failed, so the procedure is dropped: %v", createErr, err)
+		}
+		if err := grantProcedurePrivileges(ctx, db, grants); err != nil {
+			return fmt.Errorf("%w; the previous definition was restored, but %v", createErr, err)
+		}
+		return fmt.Errorf("%w; the previous definition and its grants were restored", createErr)
+	}
+
+	return grantProcedurePrivileges(ctx, db, grants)
+}
+
+// oldValueGetter returns a getter for the values in state before the update.
+func oldValueGetter(d *schema.ResourceData) func(string) interface{} {
+	return func(key string) interface{} {
+		old, _ := d.GetChange(key)
+		return old
+	}
+}
+
+// withoutDefiner returns get, but with an empty definer, so that CREATE leaves
+// out the DEFINER clause.
+func withoutDefiner(get func(string) interface{}) func(string) interface{} {
+	return func(key string) interface{} {
+		if key == "definer" {
+			return ""
+		}
+		return get(key)
+	}
+}
+
+// readProcedureGrants returns the privileges that accounts hold on the
+// procedure. Each grant keeps the database and routine name of its row,
+// because a GRANT stores the routine name with the case it was given.
+func readProcedureGrants(ctx context.Context, db *sql.DB, database, name string) ([]procedureGrant, error) {
+	stmtSQL := "SELECT Db, Routine_name, User, Host, Proc_priv FROM mysql.procs_priv " +
+		"WHERE Db = ? AND Routine_name = ? AND Routine_type = 'PROCEDURE'"
+	log.Println("[DEBUG] Executing statement:", stmtSQL)
+
+	rows, err := db.QueryContext(ctx, stmtSQL, database, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var grants []procedureGrant
+	for rows.Next() {
+		var rowDatabase, routine, user, host, procPriv string
+		if err := rows.Scan(&rowDatabase, &routine, &user, &host, &procPriv); err != nil {
+			return nil, err
+		}
+
+		grant, err := newProcedureGrant(rowDatabase, routine, user, host, procPriv)
+		if err != nil {
+			return nil, err
+		}
+		grants = append(grants, grant)
+	}
+
+	return grants, rows.Err()
+}
+
+// grantProcedurePrivileges grants the privileges again. It tries every grant,
+// so one failure does not leave the other accounts without access.
+func grantProcedurePrivileges(ctx context.Context, db *sql.DB, grants []procedureGrant) error {
+	var errs []error
+	for _, grant := range grants {
+		stmtSQL := grant.grantSQL()
+		log.Println("[DEBUG] Executing statement:", stmtSQL)
+
+		if _, err := db.ExecContext(ctx, stmtSQL); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", stmtSQL, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed restoring the grants on the procedure: %w", errors.Join(errs...))
+	}
+
+	return nil
 }
 
 func DeleteProcedure(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -380,16 +534,22 @@ func showCreateProcedure(ctx context.Context, db *sql.DB, stmtSQL string) (strin
 	return "", fmt.Errorf("no %q column in SHOW CREATE PROCEDURE output", "Create Procedure")
 }
 
-func procedureCreateSQL(d *schema.ResourceData) (string, error) {
-	parameters, err := procedureParametersSQL(d.Get("parameter").([]interface{}))
+// procedureCreateSQL builds the CREATE PROCEDURE statement from the values that
+// get returns: the planned ones from ResourceData.Get, or the old ones when the
+// previous definition is restored. orReplace is for MariaDB only.
+func procedureCreateSQL(get func(string) interface{}, orReplace bool) (string, error) {
+	parameters, err := procedureParametersSQL(get("parameter").([]interface{}))
 	if err != nil {
 		return "", err
 	}
 
 	var builder strings.Builder
 	builder.WriteString("CREATE ")
+	if orReplace {
+		builder.WriteString("OR REPLACE ")
+	}
 
-	if definer := d.Get("definer").(string); definer != "" {
+	if definer := get("definer").(string); definer != "" {
 		user, host, err := splitDefiner(definer)
 		if err != nil {
 			return "", err
@@ -399,23 +559,23 @@ func procedureCreateSQL(d *schema.ResourceData) (string, error) {
 
 	builder.WriteString(fmt.Sprintf(
 		"PROCEDURE %s (%s)",
-		qualifiedProcedureName(d.Get("database").(string), d.Get("name").(string)),
+		qualifiedProcedureName(get("database").(string), get("name").(string)),
 		parameters,
 	))
 
-	if comment := d.Get("comment").(string); comment != "" {
+	if comment := get("comment").(string); comment != "" {
 		builder.WriteString("\nCOMMENT " + quoteString(comment))
 	}
 
-	if d.Get("deterministic").(bool) {
+	if get("deterministic").(bool) {
 		builder.WriteString("\nDETERMINISTIC")
 	} else {
 		builder.WriteString("\nNOT DETERMINISTIC")
 	}
 
-	builder.WriteString("\n" + strings.ToUpper(d.Get("sql_data_access").(string)))
-	builder.WriteString("\nSQL SECURITY " + strings.ToUpper(d.Get("security_type").(string)))
-	builder.WriteString("\n" + trimBody(d.Get("body")))
+	builder.WriteString("\n" + strings.ToUpper(get("sql_data_access").(string)))
+	builder.WriteString("\nSQL SECURITY " + strings.ToUpper(get("security_type").(string)))
+	builder.WriteString("\n" + trimBody(get("body")))
 
 	return builder.String(), nil
 }
@@ -758,6 +918,63 @@ func unquote(s string) string {
 	}
 
 	return s
+}
+
+// procedurePrivileges maps the values of mysql.procs_priv.Proc_priv to the
+// privilege names of GRANT. The remaining value, Grant, is the grant option.
+var procedurePrivileges = map[string]string{
+	"Execute":       "EXECUTE",
+	"Alter Routine": "ALTER ROUTINE",
+}
+
+// procedureGrant holds the privileges of one account on one procedure, as
+// stored in a row of mysql.procs_priv.
+type procedureGrant struct {
+	Database    string
+	Routine     string
+	User        string
+	Host        string
+	Privileges  []string
+	GrantOption bool
+}
+
+func newProcedureGrant(database, routine, user, host, procPriv string) (procedureGrant, error) {
+	grant := procedureGrant{Database: database, Routine: routine, User: user, Host: host}
+
+	for _, value := range strings.Split(procPriv, ",") {
+		if value == "" {
+			continue
+		}
+		if value == "Grant" {
+			grant.GrantOption = true
+			continue
+		}
+
+		privilege, ok := procedurePrivileges[value]
+		if !ok {
+			return grant, fmt.Errorf("unknown privilege %q on procedure %s.%s", value, database, routine)
+		}
+		grant.Privileges = append(grant.Privileges, privilege)
+	}
+
+	return grant, nil
+}
+
+// grantSQL returns the GRANT statement that restores the privileges. A row
+// that holds only the grant option was created with GRANT USAGE.
+func (g procedureGrant) grantSQL() string {
+	privileges := "USAGE"
+	if len(g.Privileges) > 0 {
+		privileges = strings.Join(g.Privileges, ", ")
+	}
+
+	stmtSQL := fmt.Sprintf("GRANT %s ON PROCEDURE %s TO %s",
+		privileges, qualifiedProcedureName(g.Database, g.Routine), formatUserIdentifier(g.User, g.Host))
+	if g.GrantOption {
+		stmtSQL += " WITH GRANT OPTION"
+	}
+
+	return stmtSQL
 }
 
 func qualifiedProcedureName(database, name string) string {
