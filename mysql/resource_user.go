@@ -110,7 +110,6 @@ func resourceUser() *schema.Resource {
 			"auth_plugin": {
 				Type:             schema.TypeString,
 				Optional:         true,
-				ForceNew:         true,
 				DiffSuppressFunc: NewEmptyStringSuppressFunc,
 				ConflictsWith:    []string{"password"},
 			},
