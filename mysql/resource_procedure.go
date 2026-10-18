@@ -230,14 +230,16 @@ func UpdateProcedure(ctx context.Context, d *schema.ResourceData, meta interface
 // again after the CREATE. If the CREATE fails, the old definition and its
 // privileges are restored.
 func recreateProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData, database, name string) error {
-	newValue, oldValue := d.Get, oldValue(d)
+	getNew := d.Get
+	getOld := oldValueGetter(d)
 
 	// Without a configured definer, CREATE makes the connecting account the
 	// definer, as on the first create. Naming the definer from state instead
 	// needs SET_USER_ID when it is another account, for example after an
 	// import, and the restore below would then fail too.
 	if config := d.GetRawConfig(); config.IsNull() || config.GetAttr("definer").IsNull() {
-		newValue, oldValue = withoutDefiner(newValue), withoutDefiner(oldValue)
+		getNew = withoutDefiner(getNew)
+		getOld = withoutDefiner(getOld)
 	}
 
 	isMariaDB, err := serverMariaDB(db)
@@ -246,9 +248,9 @@ func recreateProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData, 
 	}
 
 	if isMariaDB {
-		stmtSQL, err := procedureCreateSQL(newValue, true)
+		stmtSQL, err := procedureCreateSQL(getNew, true)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed building the new definition of procedure %s.%s: %w", database, name, err)
 		}
 
 		log.Println("[DEBUG] Executing statement:", stmtSQL)
@@ -260,14 +262,14 @@ func recreateProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData, 
 		return nil
 	}
 
-	createSQL, err := procedureCreateSQL(newValue, false)
+	createSQL, err := procedureCreateSQL(getNew, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed building the new definition of procedure %s.%s: %w", database, name, err)
 	}
 
-	restoreSQL, err := procedureCreateSQL(oldValue, false)
+	restoreSQL, err := procedureCreateSQL(getOld, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed building the previous definition of procedure %s.%s: %w", database, name, err)
 	}
 
 	grants, err := readProcedureGrants(ctx, db, database, name)
@@ -300,8 +302,8 @@ func recreateProcedure(ctx context.Context, db *sql.DB, d *schema.ResourceData, 
 	return grantProcedurePrivileges(ctx, db, grants)
 }
 
-// oldValue returns a getter for the values in state before the update.
-func oldValue(d *schema.ResourceData) func(string) interface{} {
+// oldValueGetter returns a getter for the values in state before the update.
+func oldValueGetter(d *schema.ResourceData) func(string) interface{} {
 	return func(key string) interface{} {
 		old, _ := d.GetChange(key)
 		return old
