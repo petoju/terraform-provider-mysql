@@ -891,7 +891,6 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, cache *grantsCache, desir
 		// Check if the grants cover the same user, table, database
 		// If not, continue
 		if !desiredGrant.ConflictsWithGrant(dbGrant) {
-			log.Printf("[DEBUG] Skipping grant %#v as it doesn't match %#v", dbGrant, desiredGrant)
 			continue
 		}
 
