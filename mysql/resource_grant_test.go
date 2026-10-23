@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -675,6 +676,44 @@ func TestParseGrantImportID(t *testing.T) {
 				t.Errorf("parseGrantImportID(%q) = %+v, want %+v", tt.id, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestCombineGrantsKeepsInputs(t *testing.T) {
+	user := UserOrRole{Name: "jdoe", Host: "%"}
+	grantA := &TablePrivilegeGrant{Database: "db", Table: "*", Privileges: []string{"SELECT"}, UserOrRole: user}
+	grantB := &TablePrivilegeGrant{Database: "db", Table: "*", Privileges: []string{"INSERT"}, UserOrRole: user}
+
+	combined, err := combineGrants(grantA, grantB)
+	if err != nil {
+		t.Fatalf("combineGrants returned an error: %v", err)
+	}
+	if got := combined.(*TablePrivilegeGrant).Privileges; !slices.Equal(got, []string{"SELECT", "INSERT"}) {
+		t.Errorf("combined privileges = %v, want [SELECT INSERT]", got)
+	}
+	if !slices.Equal(grantA.Privileges, []string{"SELECT"}) {
+		t.Errorf("combineGrants changed its first grant to %v", grantA.Privileges)
+	}
+}
+
+func TestGrantsCache(t *testing.T) {
+	user := UserOrRole{Name: "jdoe", Host: "%"}
+	cached := &TablePrivilegeGrant{Database: "db", Table: "*", Privileges: []string{"SELECT"}, UserOrRole: user}
+	cache := newGrantsCache()
+	cache.grants[user.IDString()] = []MySQLGrant{cached}
+
+	// A cache hit must not use the database, so a nil db is enough.
+	got, err := cache.showUserGrants(context.Background(), nil, user)
+	if err != nil {
+		t.Fatalf("showUserGrants returned an error: %v", err)
+	}
+	if len(got) != 1 || got[0] != cached {
+		t.Errorf("showUserGrants = %v, want the cached grant", got)
+	}
+
+	cache.invalidate()
+	if len(cache.grants) != 0 {
+		t.Errorf("invalidate kept %d entries", len(cache.grants))
 	}
 }
 
