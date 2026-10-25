@@ -10,10 +10,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
@@ -512,7 +514,8 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	defer grantCreateMutex.Unlock(grant.GetUserOrRole().IDString())
 
 	// Check to see if there are existing roles that might be clobbered by this grant
-	conflictingGrant, err := getMatchingGrant(ctx, db, grant)
+	// Read the grants without the cache: another resource can have changed them since the last read.
+	conflictingGrant, err := getMatchingGrant(ctx, db, nil, grant)
 	if err != nil {
 		return diag.Errorf("failed showing grants: %v", err)
 	}
@@ -524,6 +527,7 @@ func CreateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 
 	log.Println("[DEBUG] Executing statement:", stmtSQL)
 	_, err = db.ExecContext(ctx, stmtSQL)
+	grantsCacheFromMeta(meta).invalidate()
 	if err != nil {
 		return diag.Errorf("Error running SQL (%v): %v", stmtSQL, err)
 	}
@@ -543,7 +547,7 @@ func ReadGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) di
 		return diagErr
 	}
 
-	grantFromDb, err := getMatchingGrant(ctx, db, grantFromTf)
+	grantFromDb, err := getMatchingGrant(ctx, db, grantsCacheFromMeta(meta), grantFromTf)
 	if err != nil {
 		return diag.Errorf("ReadGrant - getting all grants failed: %v", err)
 	}
@@ -575,6 +579,7 @@ func UpdateGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		}
 
 		err = updatePrivileges(ctx, db, d, grant)
+		grantsCacheFromMeta(meta).invalidate()
 		if err != nil {
 			return diag.Errorf("failed updating privileges: %v", err)
 		}
@@ -650,6 +655,7 @@ func DeleteGrant(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 	sqlStatement := grant.SQLRevokeStatement()
 	log.Printf("[DEBUG] SQL to delete grant: %s", sqlStatement)
 	_, err = db.ExecContext(ctx, sqlStatement)
+	grantsCacheFromMeta(meta).invalidate()
 	if err != nil {
 		if !isNonExistingGrant(err) {
 			return diag.Errorf("error revoking %s: %s", sqlStatement, err)
@@ -851,18 +857,52 @@ func combineGrants(grantA MySQLGrant, grantB MySQLGrant) (MySQLGrant, error) {
 	return nil, fmt.Errorf("unable to combine MySQLGrant %s of type %T with %s of type %T", grantA, grantA, grantB, grantB)
 }
 
-func getMatchingGrant(ctx context.Context, db *sql.DB, desiredGrant MySQLGrant) (MySQLGrant, error) {
-	allGrants, err := showUserGrants(ctx, db, desiredGrant.GetUserOrRole())
+// copyGrant returns a copy of grant that does not share its privileges or roles.
+func copyGrant(grant MySQLGrant) MySQLGrant {
+	switch g := grant.(type) {
+	case *TablePrivilegeGrant:
+		c := *g
+		c.Privileges = slices.Clone(g.Privileges)
+		return &c
+	case *ProcedurePrivilegeGrant:
+		c := *g
+		c.Privileges = slices.Clone(g.Privileges)
+		return &c
+	case *RoleGrant:
+		c := *g
+		c.Roles = slices.Clone(g.Roles)
+		return &c
+	default:
+		panic("Unknown grant type")
+	}
+}
+
+func copyGrants(grants []MySQLGrant) []MySQLGrant {
+	copies := make([]MySQLGrant, len(grants))
+	for i, grant := range grants {
+		copies[i] = copyGrant(grant)
+	}
+	return copies
+}
+
+// getMatchingGrant reads the grants from cache, or from the server if cache is nil.
+func getMatchingGrant(ctx context.Context, db *sql.DB, cache *grantsCache, desiredGrant MySQLGrant) (MySQLGrant, error) {
+	allGrants, err := cache.showUserGrants(ctx, db, desiredGrant.GetUserOrRole())
 	var result MySQLGrant
 	if err != nil {
 		return nil, fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
+	// The SDK formats each log line before Terraform filters it by level.
+	// A refresh of N grants of one user skips N x N grants, so log them only at debug level.
+	debug := logging.IsDebugOrHigher()
 	for _, dbGrant := range allGrants {
 
 		// Check if the grants cover the same user, table, database
 		// If not, continue
 		if !desiredGrant.ConflictsWithGrant(dbGrant) {
-			log.Printf("[DEBUG] Skipping grant %#v as it doesn't match %#v", dbGrant, desiredGrant)
+			if debug {
+				log.Printf("[DEBUG] Skipping grant %#v as it doesn't match %#v", dbGrant, desiredGrant)
+			}
 			continue
 		}
 
@@ -1029,6 +1069,78 @@ func parseGrantFromRow(grantStr string) (MySQLGrant, error) {
 	} else {
 		return nil, fmt.Errorf("failed to parse object portion of grant statement: %s", grantStr)
 	}
+}
+
+// grantsCache keeps the SHOW GRANTS result of each user or role for one provider
+// configuration. A refresh of many grants of one user then runs SHOW GRANTS one time.
+type grantsCache struct {
+	mu         sync.Mutex
+	generation uint64
+	grants     map[string][]MySQLGrant
+	fetchMutex *KeyedMutex
+}
+
+func newGrantsCache() *grantsCache {
+	return &grantsCache{
+		grants:     map[string][]MySQLGrant{},
+		fetchMutex: NewKeyedMutex(),
+	}
+}
+
+func grantsCacheFromMeta(meta interface{}) *grantsCache {
+	switch conf := meta.(type) {
+	case *MySQLConfiguration:
+		return conf.grantsCache
+	case *RDSDataAPIConfiguration:
+		return conf.grantsCache
+	default:
+		return nil
+	}
+}
+
+// showUserGrants returns the cached grants of userOrRole and runs SHOW GRANTS on a miss.
+// It returns copies, so the caller can change them. A nil cache always runs SHOW GRANTS.
+func (c *grantsCache) showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {
+	if c == nil {
+		return showUserGrants(ctx, db, userOrRole)
+	}
+
+	// Concurrent reads of one user wait for the first SHOW GRANTS instead of running their own.
+	key := userOrRole.IDString()
+	c.fetchMutex.Lock(key)
+	defer c.fetchMutex.Unlock(key)
+
+	c.mu.Lock()
+	grants, ok := c.grants[key]
+	generation := c.generation
+	c.mu.Unlock()
+	if ok {
+		return copyGrants(grants), nil
+	}
+
+	grants, err := showUserGrants(ctx, db, userOrRole)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// A grant change during SHOW GRANTS can make the result out of date: do not keep it.
+	if c.generation == generation {
+		c.grants[key] = grants
+	}
+	return copyGrants(grants), nil
+}
+
+// invalidate removes all cached grants. Call it after each statement that changes grants.
+func (c *grantsCache) invalidate() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.generation++
+	clear(c.grants)
 }
 
 func showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {

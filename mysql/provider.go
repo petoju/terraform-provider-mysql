@@ -82,11 +82,13 @@ type MySQLConfiguration struct {
 	MaxConnLifetime        time.Duration
 	MaxOpenConns           int
 	ConnectRetryTimeoutSec time.Duration
+	grantsCache            *grantsCache
 }
 
 type RDSDataAPIConfiguration struct {
-	Config    *rds.Config
-	AWSConfig aws.Config
+	Config      *rds.Config
+	AWSConfig   aws.Config
+	grantsCache *grantsCache
 }
 
 type CustomTLS struct {
@@ -815,8 +817,9 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		}
 
 		return &RDSDataAPIConfiguration{
-			Config:    rdsConfig,
-			AWSConfig: awsConfigObj,
+			Config:      rdsConfig,
+			AWSConfig:   awsConfigObj,
+			grantsCache: newGrantsCache(),
 		}, nil
 	}
 
@@ -850,6 +853,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 		MaxConnLifetime:        time.Duration(d.Get("max_conn_lifetime_sec").(int)) * time.Second,
 		MaxOpenConns:           d.Get("max_open_conns").(int),
 		ConnectRetryTimeoutSec: time.Duration(d.Get("connect_retry_timeout_sec").(int)) * time.Second,
+		grantsCache:            newGrantsCache(),
 	}
 
 	return mysqlConf, nil

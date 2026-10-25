@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -675,6 +676,37 @@ func TestParseGrantImportID(t *testing.T) {
 				t.Errorf("parseGrantImportID(%q) = %+v, want %+v", tt.id, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestGrantsCache(t *testing.T) {
+	user := UserOrRole{Name: "jdoe", Host: "%"}
+	cached := &TablePrivilegeGrant{Database: "db", Table: "*", Privileges: []string{"SELECT"}, UserOrRole: user}
+	cache := newGrantsCache()
+	cache.grants[user.IDString()] = []MySQLGrant{cached}
+
+	// A cache hit must not use the database, so a nil db is enough.
+	got, err := cache.showUserGrants(context.Background(), nil, user)
+	if err != nil {
+		t.Fatalf("showUserGrants returned an error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("showUserGrants returned %d grants, want 1", len(got))
+	}
+	gotGrant := got[0].(*TablePrivilegeGrant)
+	if gotGrant.GetId() != cached.GetId() || !slices.Equal(gotGrant.Privileges, cached.Privileges) {
+		t.Errorf("showUserGrants = %v, want a copy of %v", gotGrant, cached)
+	}
+
+	// The caller gets a copy: a change to it must not change the cached grant.
+	gotGrant.Privileges[0] = "INSERT"
+	if cached.Privileges[0] != "SELECT" {
+		t.Errorf("a change to the returned grant changed the cached grant to %v", cached.Privileges)
+	}
+
+	cache.invalidate()
+	if len(cache.grants) != 0 {
+		t.Errorf("invalidate kept %d entries", len(cache.grants))
 	}
 }
 
