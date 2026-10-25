@@ -838,9 +838,6 @@ func combineGrants(grantA MySQLGrant, grantB MySQLGrant) (MySQLGrant, error) {
 		return nil, fmt.Errorf("unable to combine MySQLGrant %s with %s because they don't cover the same table/database/user", grantA, grantB)
 	}
 
-	// Append to a copy: grantA can be a cached grant that other reads use.
-	grantA = copyGrant(grantA)
-
 	// We can combine grants with privileges
 	grantAWithPrivileges, aOk := grantA.(MySQLGrantWithPrivileges)
 	grantBWithPrivileges, bOk := grantB.(MySQLGrantWithPrivileges)
@@ -878,6 +875,14 @@ func copyGrant(grant MySQLGrant) MySQLGrant {
 	default:
 		panic("Unknown grant type")
 	}
+}
+
+func copyGrants(grants []MySQLGrant) []MySQLGrant {
+	copies := make([]MySQLGrant, len(grants))
+	for i, grant := range grants {
+		copies[i] = copyGrant(grant)
+	}
+	return copies
 }
 
 // getMatchingGrant reads the grants from cache, or from the server if cache is nil.
@@ -1094,7 +1099,7 @@ func grantsCacheFromMeta(meta interface{}) *grantsCache {
 }
 
 // showUserGrants returns the cached grants of userOrRole and runs SHOW GRANTS on a miss.
-// The returned grants are shared: do not change them. A nil cache always runs SHOW GRANTS.
+// It returns copies, so the caller can change them. A nil cache always runs SHOW GRANTS.
 func (c *grantsCache) showUserGrants(ctx context.Context, db *sql.DB, userOrRole UserOrRole) ([]MySQLGrant, error) {
 	if c == nil {
 		return showUserGrants(ctx, db, userOrRole)
@@ -1110,7 +1115,7 @@ func (c *grantsCache) showUserGrants(ctx context.Context, db *sql.DB, userOrRole
 	generation := c.generation
 	c.mu.Unlock()
 	if ok {
-		return grants, nil
+		return copyGrants(grants), nil
 	}
 
 	grants, err := showUserGrants(ctx, db, userOrRole)
@@ -1124,7 +1129,7 @@ func (c *grantsCache) showUserGrants(ctx context.Context, db *sql.DB, userOrRole
 	if c.generation == generation {
 		c.grants[key] = grants
 	}
-	return grants, nil
+	return copyGrants(grants), nil
 }
 
 // invalidate removes all cached grants. Call it after each statement that changes grants.

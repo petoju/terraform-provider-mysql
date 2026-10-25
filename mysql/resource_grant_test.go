@@ -679,23 +679,6 @@ func TestParseGrantImportID(t *testing.T) {
 	}
 }
 
-func TestCombineGrantsKeepsInputs(t *testing.T) {
-	user := UserOrRole{Name: "jdoe", Host: "%"}
-	grantA := &TablePrivilegeGrant{Database: "db", Table: "*", Privileges: []string{"SELECT"}, UserOrRole: user}
-	grantB := &TablePrivilegeGrant{Database: "db", Table: "*", Privileges: []string{"INSERT"}, UserOrRole: user}
-
-	combined, err := combineGrants(grantA, grantB)
-	if err != nil {
-		t.Fatalf("combineGrants returned an error: %v", err)
-	}
-	if got := combined.(*TablePrivilegeGrant).Privileges; !slices.Equal(got, []string{"SELECT", "INSERT"}) {
-		t.Errorf("combined privileges = %v, want [SELECT INSERT]", got)
-	}
-	if !slices.Equal(grantA.Privileges, []string{"SELECT"}) {
-		t.Errorf("combineGrants changed its first grant to %v", grantA.Privileges)
-	}
-}
-
 func TestGrantsCache(t *testing.T) {
 	user := UserOrRole{Name: "jdoe", Host: "%"}
 	cached := &TablePrivilegeGrant{Database: "db", Table: "*", Privileges: []string{"SELECT"}, UserOrRole: user}
@@ -707,8 +690,18 @@ func TestGrantsCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("showUserGrants returned an error: %v", err)
 	}
-	if len(got) != 1 || got[0] != cached {
-		t.Errorf("showUserGrants = %v, want the cached grant", got)
+	if len(got) != 1 {
+		t.Fatalf("showUserGrants returned %d grants, want 1", len(got))
+	}
+	gotGrant := got[0].(*TablePrivilegeGrant)
+	if gotGrant.GetId() != cached.GetId() || !slices.Equal(gotGrant.Privileges, cached.Privileges) {
+		t.Errorf("showUserGrants = %v, want a copy of %v", gotGrant, cached)
+	}
+
+	// The caller gets a copy: a change to it must not change the cached grant.
+	gotGrant.Privileges[0] = "INSERT"
+	if cached.Privileges[0] != "SELECT" {
+		t.Errorf("a change to the returned grant changed the cached grant to %v", cached.Privileges)
 	}
 
 	cache.invalidate()
