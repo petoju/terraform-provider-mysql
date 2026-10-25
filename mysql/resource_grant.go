@@ -15,6 +15,7 @@ import (
 
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
@@ -886,11 +887,17 @@ func getMatchingGrant(ctx context.Context, db *sql.DB, cache *grantsCache, desir
 	if err != nil {
 		return nil, fmt.Errorf("showGrant - getting all grants failed: %w", err)
 	}
+	// The SDK formats each log line before Terraform filters it by level.
+	// A refresh of N grants of one user skips N x N grants, so log them only at debug level.
+	debug := logging.IsDebugOrHigher()
 	for _, dbGrant := range allGrants {
 
 		// Check if the grants cover the same user, table, database
 		// If not, continue
 		if !desiredGrant.ConflictsWithGrant(dbGrant) {
+			if debug {
+				log.Printf("[DEBUG] Skipping grant %#v as it doesn't match %#v", dbGrant, desiredGrant)
+			}
 			continue
 		}
 
