@@ -53,6 +53,29 @@ func TestAccUser_basic(t *testing.T) {
 	})
 }
 
+func TestAccUser_importNonExistent(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        testAccUserConfig_importNonExistent,
+				ResourceName:  "mysql_user.test",
+				ImportState:   true,
+				ImportStateId: "tf-import-missing@%",
+				ExpectError:   regexp.MustCompile(`user tf-import-missing@% not found`),
+			},
+		},
+	})
+}
+
+const testAccUserConfig_importNonExistent = `
+resource "mysql_user" "test" {
+  user = "tf-import-missing"
+  host = "%"
+}
+`
+
 func TestAccUser_auth(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheckSkipTiDB(t); testAccPreCheckSkipMariaDB(t); testAccPreCheckSkipRds(t) },
