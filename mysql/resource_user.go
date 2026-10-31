@@ -847,12 +847,18 @@ func ImportUser(ctx context.Context, d *schema.ResourceData, meta interface{}) (
 	d.Set("user", user)
 	d.Set("host", host)
 	err := ReadUser(ctx, d, meta)
-	var ferror error
 	if err.HasError() {
-		ferror = fmt.Errorf("failed reading user: %v", err)
+		return nil, fmt.Errorf("failed reading user: %v", err)
 	}
 
-	return []*schema.ResourceData{d}, ferror
+	// ReadUser clears the ID when the user does not exist. Returning a
+	// resource without an ID makes Terraform report a provider bug, so
+	// return a proper error instead.
+	if d.Id() == "" {
+		return nil, fmt.Errorf("user %s@%s not found", user, host)
+	}
+
+	return []*schema.ResourceData{d}, nil
 }
 
 func getWriteOnlyString(d *schema.ResourceData, pathName string) (string, diag.Diagnostics) {
