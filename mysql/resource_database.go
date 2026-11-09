@@ -205,9 +205,17 @@ func extractIdentAfter(sql string, keyword string) string {
 }
 
 func ImportDatabase(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	err := ReadDatabase(ctx, d, meta)
-	if err != nil {
-		return nil, fmt.Errorf("error while importing: %v", err)
+	name := d.Id()
+	diags := ReadDatabase(ctx, d, meta)
+	if diags.HasError() {
+		return nil, fmt.Errorf("error while importing: %v", diags)
+	}
+
+	// ReadDatabase clears the ID when the database does not exist. Returning
+	// a resource without an ID makes Terraform report a provider bug, so
+	// return a proper error instead.
+	if d.Id() == "" {
+		return nil, fmt.Errorf("database %s not found", name)
 	}
 
 	return []*schema.ResourceData{d}, nil

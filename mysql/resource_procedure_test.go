@@ -280,6 +280,25 @@ func TestAccProcedure_trailingSemicolon(t *testing.T) {
 	})
 }
 
+func TestAccProcedure_importNonExistent(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			testAccPreCheckSkipTiDB(t)
+		},
+		ProviderFactories: testAccProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        testAccProcedureConfigNoParameters,
+				ResourceName:  "mysql_procedure.test",
+				ImportState:   true,
+				ImportStateId: "tf_test_procedure.missing",
+				ExpectError:   regexp.MustCompile(`procedure tf_test_procedure\.missing not found`),
+			},
+		},
+	})
+}
+
 func testAccProcedureExists(rn string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[rn]

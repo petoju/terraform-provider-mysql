@@ -401,12 +401,15 @@ func ImportProcedure(ctx context.Context, d *schema.ResourceData, meta interface
 		return nil, err
 	}
 
+	id := d.Id()
 	if err := readProcedure(ctx, db, d); err != nil {
 		return nil, err
 	}
 
+	// readProcedure clears the ID when the procedure does not exist, so use
+	// the ID we were given in the error.
 	if d.Id() == "" {
-		return nil, fmt.Errorf("procedure %s not found", d.Id())
+		return nil, fmt.Errorf("procedure %s not found", id)
 	}
 
 	return []*schema.ResourceData{d}, nil

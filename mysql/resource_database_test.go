@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -29,6 +30,22 @@ func TestAccDatabase(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateId:     dbName,
+			},
+		},
+	})
+}
+
+func TestAccDatabase_importNonExistent(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        testAccDatabaseConfigBasic("tf_import_missing"),
+				ResourceName:  "mysql_database.test",
+				ImportState:   true,
+				ImportStateId: "tf_import_missing",
+				ExpectError:   regexp.MustCompile(`database tf_import_missing not found`),
 			},
 		},
 	})
