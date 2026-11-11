@@ -573,7 +573,9 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	var connParams = make(map[string]string)
 	var authPlugin = d.Get("authentication_plugin").(string)
 	var allowClearTextPasswords = authPlugin == cleartextPasswords
-	var allowNativePasswords = authPlugin == nativePasswords
+	// The server can start the handshake with mysql_native_password and then
+	// switch an IAM user to mysql_clear_password, so cleartext keeps native allowed.
+	var allowNativePasswords = authPlugin == nativePasswords || authPlugin == cleartextPasswords
 	var username = d.Get("username").(string)
 	var password = d.Get("password").(string)
 	var iamAuth = d.Get("iam_database_authentication").(bool)
