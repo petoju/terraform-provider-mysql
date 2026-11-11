@@ -68,10 +68,12 @@ func alterUserDefaultRoles(ctx context.Context, db *sql.DB, user, host string, r
 	}
 
 	var rolesFragment string
-	if len(roles) > 0 {
-		rolesFragment = fmt.Sprintf("'%s'", strings.Join(roles, "', '"))
-	} else {
+	if len(roles) == 0 {
 		rolesFragment = "NONE"
+	} else if !isMariaDB && isAllRoles(roles) {
+		rolesFragment = "ALL"
+	} else {
+		rolesFragment = fmt.Sprintf("'%s'", strings.Join(roles, "', '"))
 	}
 
 	var stmtSQL string
@@ -88,6 +90,47 @@ func alterUserDefaultRoles(ctx context.Context, db *sql.DB, user, host string, r
 	}
 
 	return nil
+}
+
+// isAllRoles reports whether roles is the single keyword ALL, which MySQL
+// expands to every role granted to the user.
+func isAllRoles(roles []string) bool {
+	return len(roles) == 1 && strings.EqualFold(roles[0], "ALL")
+}
+
+// grantedRolesMatch reports whether the default roles are exactly the roles
+// granted to the user, which is what DEFAULT ROLE ALL stores.
+func grantedRolesMatch(ctx context.Context, db *sql.DB, user, host string, defaultRoles []string) (bool, error) {
+	stmtSQL := "SELECT from_user FROM mysql.role_edges WHERE to_user = ? AND to_host = ?"
+	log.Println("[DEBUG] Executing statement:", stmtSQL)
+
+	rows, err := db.QueryContext(ctx, stmtSQL, user, host)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	granted := make(map[string]bool)
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return false, err
+		}
+		granted[role] = true
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+
+	if len(granted) != len(defaultRoles) {
+		return false, nil
+	}
+	for _, role := range defaultRoles {
+		if !granted[role] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func getRolesFromData(d *schema.ResourceData) []string {
@@ -185,6 +228,18 @@ func ReadDefaultRoles(ctx context.Context, d *schema.ResourceData, meta interfac
 
 	if rows.Err() != nil {
 		return diag.Errorf("failed getting rows: %v", rows.Err())
+	}
+
+	// DEFAULT ROLE ALL is stored as the list of granted roles. Keep ALL in
+	// the state while that list is still every granted role.
+	if !isMariaDB && isAllRoles(getRolesFromData(d)) {
+		match, err := grantedRolesMatch(ctx, db, d.Get("user").(string), d.Get("host").(string), defaultRoles)
+		if err != nil {
+			return diag.Errorf("failed to read roles granted to the user: %v", err)
+		}
+		if match {
+			defaultRoles = getRolesFromData(d)
+		}
 	}
 
 	d.Set("roles", defaultRoles)
