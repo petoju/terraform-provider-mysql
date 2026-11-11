@@ -41,6 +41,15 @@ func TestAccDefaultRoles_basic(t *testing.T) {
 				),
 			},
 			{
+				SkipFunc: skipIfMariaDB,
+				Config:   testAccDefaultRolesAll,
+				Check: resource.ComposeTestCheckFunc(
+					testAccDefaultRoles("mysql_default_roles.test", "role1", "role2"),
+					resource.TestCheckResourceAttr("mysql_default_roles.test", "roles.#", "1"),
+					resource.TestCheckResourceAttr("mysql_default_roles.test", "roles.0", "ALL"),
+				),
+			},
+			{
 				Config: testAccDefaultRolesNone,
 				Check: resource.ComposeTestCheckFunc(
 					testAccDefaultRoles("mysql_default_roles.test"),
@@ -241,6 +250,36 @@ resource "mysql_default_roles" "test" {
 	user = mysql_user.test.user
 	host = mysql_user.test.host
 	roles = mysql_grant.test.roles
+}
+`
+
+const testAccDefaultRolesAll = `
+resource "mysql_role" "role1" {
+	name = "role1"
+}
+
+resource "mysql_role" "role2" {
+	name = "role2"
+}
+
+resource "mysql_user" "test" {
+	user = "jdoe"
+	host = "%"
+}
+
+resource "mysql_grant" "test" {
+	user     = mysql_user.test.user
+	host     = mysql_user.test.host
+	database = ""
+	roles    = [mysql_role.role1.name, mysql_role.role2.name]
+}
+
+resource "mysql_default_roles" "test" {
+	user  = mysql_user.test.user
+	host  = mysql_user.test.host
+	roles = ["ALL"]
+
+	depends_on = [mysql_grant.test]
 }
 `
 
