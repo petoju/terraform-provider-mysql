@@ -402,7 +402,7 @@ The following arguments are supported:
 - `max_conn_lifetime_sec` - (Optional) Sets the maximum amount of time a connection may be reused. If d <= 0, connections are reused forever.
 - `max_open_conns` - (Optional) Sets the maximum number of open connections to the database. If n <= 0, then there is no limit on the number of open connections.
 - `conn_params` - (Optional) Sets extra mysql connection parameters (ODBC parameters). Most useful for session variables such as `default_storage_engine`, `foreign_key_checks` or `sql_log_bin`.
-- `authentication_plugin` - (Optional) Sets the authentication plugin, it can be one of the following: `native` or `cleartext`. Defaults to `native`.
+- `authentication_plugin` - (Optional) Sets the authentication plugin, it can be one of the following: `native` or `cleartext`. Defaults to `native`. `cleartext` also keeps `native` allowed, because the server can start the handshake with `mysql_native_password` and switch to `mysql_clear_password` afterwards (for example, IAM database authentication over a plain TCP endpoint).
 - `iam_database_authentication` - (Optional, **deprecated**) Use `gcp_config.iam_database_authentication` instead.
 - `private_ip` - (Optional, **deprecated**) Use `gcp_config.private_ip` instead.
 - `gcp_config` - (Optional) Sets the GCP configuration for the connection. This argument only applies to CloudSQL and is ignored elsewhere. See [Authenticating to Cloud SQL Admin API](#authenticating-to-cloud-sql-admin-api). This is a block containing the following arguments:
